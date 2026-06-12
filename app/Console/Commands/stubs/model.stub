@@ -1,0 +1,32 @@
+<?php
+
+namespace {{namespace}};
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder;
+
+class {{classname}} extends Model
+{
+    {{softDelete}}
+    
+    {{tableNameDef}}
+    
+    protected $fillable = [
+        {{fillable}}
+    ];
+ 
+    protected $hidden = [ 'created_at', 'updated_at', 'deleted_at' ];
+
+    public static function defaultRules()
+    {
+        return [
+            {{general_rules}}
+        ];
+    }
+
+    {{scopeSearch}}
+
+}
+
+
+

@@ -1,0 +1,20 @@
+#region "store"
+#[OA\Post(
+    tags: ["{{tag}}"],
+    description: "create new {{model}}",
+    path: "/api/v1/{{model}}",
+    operationId: "{{classname}}@store",
+)]
+#[OA\RequestBody(content: new OA\JsonContent(ref: "schemas/{{model}}-form.json"))]
+#[Response2xx(response: 201, description: "Success")]
+#[ResponseDefault()]
+#endregion
+
+public function store({{Modelclassname}}Request $request)
+{
+    
+    $model = new {{Modelclassname}}Resource(
+        {{Modelclassname}}::create($request->validated())
+    );
+    return response()->json($model, 201);
+}

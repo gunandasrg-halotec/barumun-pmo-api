@@ -2,89 +2,88 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Core\Response2xx;
+use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\LoginRequest;
+use App\Http\Resources\LoginResource;
+use Illuminate\Database\Eloquent\Attributes\UseResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use App\Models\User;
-
+use OpenApi\Attributes as OA;
 class AuthController extends Controller
 {
-    public function login(Request $request): JsonResponse
+    #[OA\Post(
+        tags: [AUTHENTICATION_TAG],
+        path: "/v1/auth/login",
+        description: "Login as user",
+        summary: "Authenticate user ",
+        operationId: "AuthController@login"
+
+    )]
+    #[OA\RequestBody(
+        content: new OA\JsonContent(
+            ref: "schemas/login_request.yaml"
+        )
+    )]
+    #[OA\Response(response: 200, description: "Login accepted",
+        content: new OA\JsonContent(ref: "schemas/login_resource.yaml"))]
+    #[ResponseDefault()]
+    public function login(LoginRequest $loginRequest): JsonResponse
     {
-        $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required'],
-        ]);
 
-        $user = User::with('role')->where('email', $request->email)->first();
-
-        if (!$user || !Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
-            ]);
-        }
-
-        if (!$user->is_active) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Your account has been deactivated. Please contact administrator.',
-            ], 403);
-        }
-
-        // Revoke previous tokens
-        $user->tokens()->delete();
-
-        $token = $user->createToken('api-token')->plainTextToken;
-
+        $token = $loginRequest->authenticate();
+        $user = Auth::user();
+        $user = new LoginResource($user);
         return response()->json([
-            'success' => true,
-            'message' => 'Login successful',
-            'data' => [
-                'token' => $token,
-                'user' => [
-                    'id' => $user->id,
-                    'full_name' => $user->full_name,
-                    'email' => $user->email,
-                    'is_active' => $user->is_active,
-                    'role' => [
-                        'id' => $user->role->id,
-                        'name' => $user->role->role_name,
-                    ],
-                ],
-            ],
-        ]);
+            "user" => $user,
+            "token" => $token
+        ], status: 200, headers: ['Authorization' => "Bearer {$token}"]);
     }
+
+    #[OA\Get(
+        tags: [AUTHENTICATION_TAG],
+        operationId: "AuthController@me",
+        path: "/v1/auth/me",
+        description: "Get current user info",
+        security: [Auth_JWT],
+        responses: [
+            new OA\Response(
+                response: 200,
+                description: "OK",
+                content: new OA\JsonContent(ref: "schemas/login_resource.yaml")
+            )
+        ]
+
+
+    )]
+    #[ResponseDefault()]
 
     public function me(Request $request): JsonResponse
     {
         $user = $request->user()->load('role');
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Current user fetched',
-            'data' => [
-                'id' => $user->id,
-                'full_name' => $user->full_name,
-                'email' => $user->email,
-                'is_active' => $user->is_active,
-                'role' => [
-                    'id' => $user->role->id,
-                    'name' => $user->role->role_name,
-                ],
-            ],
-        ]);
+        return response()->json(new LoginResource($user));
     }
 
-    public function logout(Request $request): JsonResponse
-    {
-        $request->user()->currentAccessToken()->delete();
+    #[OA\Post(
+        tags: [AUTHENTICATION_TAG],
+        path: "/v1/auth/logout",
+        operationId: "AuthController@logout",
+        summary: "Logout from system",
+        responses: [
+            new Response2xx(204, "successfully logged out from system")
+        ],
+        security: [Auth_JWT]
+    )]
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Logged out successfully',
-        ]);
+    public function logout(Request $request)
+    {
+        Auth::logout();
+        return response(status: 204);
     }
 }

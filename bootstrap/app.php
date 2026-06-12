@@ -1,59 +1,60 @@
 <?php
 
+
+use App\Core\ExceptionResponse;
+use App\Enums\DeliveryProcessLogEnum;
+use App\Http\Middleware\ApiResponseHeader;
+use App\Http\Middleware\JwtAuthMiddleware;
+use App\Http\Middleware\KeyAuthMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+
+
 
 return Application::configure(basePath: dirname(__DIR__))
+
     ->withRouting(
+        web: __DIR__ . '/../routes/web.php',
         api: __DIR__ . '/../routes/api.php',
-        apiPrefix: 'api',
+        commands: __DIR__ . '/../routes/console.php',
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->statefulApi();
 
-        $middleware->api(prepend: [
-            \Illuminate\Http\Middleware\HandleCors::class,
+        $middleware->alias([
+            "jwtAuth" => JwtAuthMiddleware::class,
+        ]);
+
+        $middleware->api([ApiResponseHeader::class]);
+        // $middleware->appendToGroup("api", [ApiResponseHeader::class]);
+        $middleware->web(remove: [
+            \Illuminate\Session\Middleware\StartSession::class,
+            \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+            \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class,
+            \Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class,
         ]);
     })
-    ->withExceptions(function (Exceptions $exceptions) {
-        // Always return JSON for API routes
-        $exceptions->shouldRenderJsonWhen(function (Request $request, Throwable $e) {
-            return $request->is('api/*') || $request->wantsJson();
-        });
+    ->withExceptions(
+        function (Exceptions $exceptions) {
 
-        // Handle validation errors
-        $exceptions->renderable(function (ValidationException $e, Request $request) {
-            if ($request->is('api/*')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Validation failed',
-                    'errors' => $e->errors(),
-                ], 422);
-            }
-        });
 
-        // Handle 404
-        $exceptions->renderable(function (NotFoundHttpException $e, Request $request) {
-            if ($request->is('api/*')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Resource not found',
-                ], 404);
-            }
-        });
+            $exceptions->context(fn() => [
+                'current_route' => request()?->route()?->uri(),
+                "exception_type" => get_class($exceptions),
+                'user' => auth()?->user()?->display_name,
+            ]);
 
-        // Handle runtime / business rule errors
-        $exceptions->renderable(function (\RuntimeException $e, Request $request) {
-            if ($request->is('api/*')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => $e->getMessage(),
-                ], 422);
+            if (request()->is("api/*")) {
+
+                ExceptionResponse::setReponse($exceptions);
             }
-        });
-    })->create();
+
+
+        }
+    )
+    ->withEvents(discover: [
+
+
+    ])
+    ->create();

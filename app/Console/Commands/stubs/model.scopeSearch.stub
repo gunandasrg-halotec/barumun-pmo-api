@@ -1,0 +1,24 @@
+/**
+* $filters = ["search", "trashed"]
+*/
+public function scopeQueryParameters(Builder $query, array $queryParams)
+{
+    $query
+    ->when($queryParams["search"] ?? null, function ($query, $search) {
+        {{filterQuery}}
+    })
+    ->when($queryParams["filter"]??null, function ($query, $criterion){
+        
+    })
+    ->when($queryParams["sort-by"] ?? null, function ($query, $sortBy) use ($queryParams) {
+        $sortDir = $queryParams["sort-dir"] ?? "asc";
+        $query->sortBy($sortBy, $sortDir);
+    })
+    ->when($queryParams["trashed"] ?? null, function ($query, $trashed) {
+        if ($trashed === "with") {
+            $query->withTrashed();
+        } elseif ($trashed === "only") {
+            $query->onlyTrashed();
+        }
+    });
+}

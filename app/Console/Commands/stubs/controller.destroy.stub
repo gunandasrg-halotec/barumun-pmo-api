@@ -1,0 +1,22 @@
+#region "destroy"
+#[OA\Delete(
+    tags: ["{{tag}}"],
+    description: "delete {{model}}",
+    path: "/api/v1/{{model}}/{id}",
+    operationId: "{{classname}}@destroy",
+    parameters: [
+        new OA\Parameter(parameter: "id", name: "id", in: "path")
+    ]
+
+)]
+#[Response2xx(response: 204, description: "Model successfully deleted")]
+#[ResponseDefault()]
+#endregion
+
+public function destroy({{Modelclassname}}Request $request, $id)
+{
+    
+    $model = {{Modelclassname}}::findOrFail($id);
+    $model->delete();
+    return response()->json(status: 204);
+}

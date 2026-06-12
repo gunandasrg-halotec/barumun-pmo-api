@@ -1,0 +1,28 @@
+<?php
+
+namespace {{namespace}};
+
+use Illuminate\Http\Request;
+use App\Core\ModelResource;
+use OpenApi\Attributes as OA;
+
+
+#[OA\Schema(schema: "{{ModelResource_classname}}",
+    properties: [
+        {{ModelResource_properties}}
+    ]
+)]
+class {{ModelResource_classname}} extends ModelResource
+{
+    /**
+     * Transform the resource into an array.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(Request $request): array
+    {
+        return [
+            {{ModelResource_return_values}}
+        ];
+    }
+}

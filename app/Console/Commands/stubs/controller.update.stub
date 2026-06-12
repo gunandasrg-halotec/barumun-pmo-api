@@ -1,0 +1,23 @@
+#region "update"
+#[OA\Put(
+    tags: ["{{tag}}"],
+    description: "update {{model}}",
+    path: "/api/v1/{{model}}/{id}",
+    operationId: "{{classname}}@update",
+    parameters: [
+        new OA\Parameter(parameter: "id", name: "id", in: "path")
+    ]
+
+)]
+#[OA\RequestBody(content: new OA\JsonContent(ref: "schemas/{{model}}-form.json"))]
+#[Response2xx(response: 201, description: "Success")]
+#[ResponseDefault()]
+#endregion
+
+public function update({{Modelclassname}}Request $request, $id)
+{
+    
+    $model = {{Modelclassname}}::findOrFail($id);
+    $model->update($request->validated());
+    return response()->json($model, 201);
+}

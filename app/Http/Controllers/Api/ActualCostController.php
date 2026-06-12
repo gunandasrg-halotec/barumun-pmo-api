@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Core\Response200WithPagination;
+use App\Core\Response2xx;
 use App\Http\Controllers\Controller;
 use App\Models\ActualCostTransaction;
 use App\Models\ProgressEntry;
@@ -9,15 +11,28 @@ use App\Models\Project;
 use App\Services\CostService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-
+use OpenApi\Attributes as OA;
+use OpenApi\Attributes\JsonContent;
 class ActualCostController extends Controller
 {
-    public function __construct(private CostService $costService) {}
+    public function __construct(private CostService $costService)
+    {
+    }
 
+    #[OA\Get(
+        tags: [ACTUAL_COST_TAG],
+        path: "/v1/projects/{project_id}/actual-cost-transactions",
+        summary: "Actual Cost",
+        operationId: "ActualCostController@index",
+        description: "List Actual Cost for project",
+    )]
+    #[Response200WithPagination(ref: "project_actual_cost", description: "actual cost list")]
     public function index(Request $request, Project $project): JsonResponse
     {
         $query = ActualCostTransaction::with([
-            'progressEntry.wbdNode', 'enteredByUser.role', 'reviewedByUser',
+            'progressEntry.wbdNode',
+            'enteredByUser.role',
+            'reviewedByUser',
         ])
             ->where('project_id', $project->id)
             ->orderByDesc('transaction_date');
@@ -37,9 +52,8 @@ class ActualCostController extends Controller
         $costs = $query->paginate($request->get('limit', 20));
 
         return response()->json([
-            'success' => true,
             'message' => 'Cost transactions fetched successfully',
-            'data' => $costs->map(fn ($c) => $this->formatCost($c)),
+            'data' => $costs->map(fn($c) => $this->formatCost($c)),
             'meta' => [
                 'page' => $costs->currentPage(),
                 'limit' => $costs->perPage(),
@@ -47,7 +61,17 @@ class ActualCostController extends Controller
             ],
         ]);
     }
+    #[OA\Post(
+        tags: [ACTUAL_COST_TAG],
+        operationId: "ActualCostController@store",
+        path: "/projects/{project_id}/actual-cost-transaction",
+        description: "Create Actual Cost for a project",
+        requestBody: new OA\RequestBody(
+            content: new JsonContent(ref: "schema/actual_cost_request.yaml")
+        ),
 
+    )]
+    #[Response2xx(201, "OK  ")]
     public function store(Request $request, Project $project): JsonResponse
     {
         if (!$request->user()->canInputCost()) {
@@ -80,8 +104,11 @@ class ActualCostController extends Controller
     public function show(Request $request, ActualCostTransaction $actualCostTransaction): JsonResponse
     {
         $actualCostTransaction->load([
-            'project', 'progressEntry.wbdNode',
-            'enteredByUser.role', 'reviewedByUser', 'rejectedByUser',
+            'project',
+            'progressEntry.wbdNode',
+            'enteredByUser.role',
+            'reviewedByUser',
+            'rejectedByUser',
         ]);
 
         return response()->json([

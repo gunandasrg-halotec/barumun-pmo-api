@@ -1,0 +1,28 @@
+<?php
+
+namespace {{namespace}};
+
+use App\Core\Response200WithPagination;
+use App\Core\Response2xx;
+use App\Core\ResponseDefault;
+use App\Core\GetIndexRequest;
+use Illuminate\Http\Request;
+use OpenApi\Attributes as OA;
+
+{{uses}}
+ 
+class {{classname}} extends Controller
+{
+    
+    {{index}}
+
+    {{show}}
+
+    {{store}}
+
+    {{update}}
+    
+    {{destroy}}
+
+
+}

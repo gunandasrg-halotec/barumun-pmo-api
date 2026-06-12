@@ -1,0 +1,8 @@
+*
+!prompts/*
+!private/
+!public/
+!google-cloud/
+!prompts
+!.gitignore
+

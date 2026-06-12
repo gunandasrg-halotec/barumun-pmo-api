@@ -1,0 +1,22 @@
+#region "show"
+#[OA\Get(
+    tags: ["{{tag}}"],
+    description: "{{model}} detail",
+    path: "/api/v1/{{model}}/{id}",
+    operationId: "{{classname}}@show",
+    parameters: [
+        new OA\Parameter(parameter: "id", name: "id", in: "path")
+    ]
+)]
+#[OA\Response(response: 200, description: "{{model}} detail",
+    content: new OA\JsonContent(ref:{{Modelclassname}}Resource::class))]
+#[ResponseDefault(description: "")]
+#endregion
+
+public function show({{Modelclassname}}Request $request, $id)
+{
+    $model = new {{Modelclassname}}Resource( 
+            {{Modelclassname}}::findOrFail($id)
+        );
+    return $model;
+}

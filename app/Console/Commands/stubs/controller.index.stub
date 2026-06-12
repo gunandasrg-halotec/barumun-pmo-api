@@ -1,0 +1,21 @@
+#region "index"
+#[GetIndexRequest(
+    tags: ["{{tag}}"],
+    description: "List of {{model}}s",
+    path: "/api/v1/{{model}}s",
+    operationId: "{{classname}}@index",
+    security: [["apiAuth" => []]],
+)]
+#[Response200WithPagination(ref: "schemas/{{model}}.json", description: "List Of {{model}}s")]
+#[ResponseDefault(responseCode: 403, description: "Authentication Error")]
+#endregion
+
+public function index({{Modelclassname}}Request $request)
+{
+    $models = {{Modelclassname}}Resource::collection(
+        {{Modelclassname}}::
+            queryParameters($request->only("search", "filter", "sort-by", "sort-dir"))
+            ->paginate($request->query("per-page"))
+    );
+    return $models;
+}
