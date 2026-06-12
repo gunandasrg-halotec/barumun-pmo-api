@@ -1,0 +1,17 @@
+/vendor/
+/node_modules/
+.env
+.env.backup
+.phpunit.result.cache
+storage/*.key
+storage/app/public/*
+!storage/app/public/.gitkeep
+storage/logs/*
+!storage/logs/.gitkeep
+bootstrap/cache/*
+!bootstrap/cache/.gitkeep
+Homestead.json
+Homestead.yaml
+npm-debug.log
+yarn-error.log
+.DS_Store
