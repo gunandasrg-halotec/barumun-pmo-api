@@ -78,6 +78,7 @@ class ExceptionResponse
                 Context::add("type", $previous::class);
                 if ($previous instanceof AuthorizationException) {
                     $statusCode = 403;
+                    $rvalue["type"]="Credential Errors";
                     return response()->json($rvalue, $statusCode);
                 }
 

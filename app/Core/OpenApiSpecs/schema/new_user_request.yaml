@@ -1,0 +1,22 @@
+type: object
+properties:
+  full_name:
+    type: string
+    max: 150
+    min: 3
+  email:
+    type: string
+    format: email
+  password:
+    type: string
+    min: 8
+  role_id:
+    type: string
+    format: uuid
+  is_active:
+    type: boolean
+required:
+  - full_name
+  - email
+  - password
+  - role_id

@@ -9,7 +9,7 @@
 
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="SwaggerUI" />
-    <title>Shieldtech AI Gateway| SwaggerUI</title>
+    <title>PMO Service</title>
     <link rel="stylesheet" href="https://unpkg.com/swagger-ui@5.30.2/dist/swagger-ui.css" />
 
     <link rel="stylesheet" href="css/swagger-ui.css" />

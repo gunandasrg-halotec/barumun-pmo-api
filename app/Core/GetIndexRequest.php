@@ -20,6 +20,19 @@ use function GuzzleHttp\default_ca_bundle;
 class GetIndexRequest extends BaseGet
 {
     public $method = 'get';
+    /**
+     * Summary of __construct
+     * @param string $path
+     * @param string $operationId
+     * @param mixed $description
+     * @param mixed $summary
+     * @param mixed $security
+     * @param mixed $tags
+     * @param string[]|null $parameters
+     * @param \OpenApi\Attributes\Parameter[]|null $filters
+     * @param mixed $externalDocs
+     * @param mixed $x
+     */
     public function __construct(
         string $path,
         string $operationId,
@@ -28,30 +41,32 @@ class GetIndexRequest extends BaseGet
         ?array $security = null,
         ?array $tags = null,
         ?array $parameters = null,
+        ?array $filters = null,
         ?ExternalDocumentation $externalDocs = null,
         ?array $x = null,
     ) {
 
 
         if (!$parameters) {
-            $parameters = ["page", "per-page", "search", "filter", "sort-by", "sort-dir"];
+            $parameters = ["page", "per-page", "search", "sort-by", "sort-dir"];
         }
         $parameters = array_map(function ($item) {
             $rvalue = null;
             switch ($item) {
                 case "sort-dir":
-                    $rvalue = new Parameter( in: "query", name: $item, schema: new Schema(type: "string", enum: ["asc", "desc"]));
+                    $rvalue = new Parameter(in: "query", name: $item, schema: new Schema(type: "string", enum: ["asc", "desc"]));
                     break;
                 case "page":
                 case "per-page":
-                    $rvalue = new Parameter( in: "query", name: $item, schema: new Schema(type: "integer"));
+                    $rvalue = new Parameter(in: "query", name: $item, schema: new Schema(type: "integer"));
                     break;
                 default:
-                    $rvalue = new Parameter( in: "query", name: $item, schema: new Schema(type: "string"));
+                    $rvalue = new Parameter(in: "query", name: $item, schema: new Schema(type: "string"));
             }
 
             return $rvalue;
         }, $parameters);
+        $parameters = array_merge($parameters, $filters);
 
         parent::__construct(array_filter([
             'path' => $path ?? Generator::UNDEFINED,

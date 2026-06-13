@@ -135,4 +135,31 @@ class User extends Authenticatable implements JWTSubject, IAuthenticatable
         return [];
     }
 
+    public function scopeAccounts($query, array $queryParams)
+    {
+        $query
+            ->when($queryParams["search"] ?? null, function ($query, $search) {
+                $query->where("full_name", "like", "%{$search}%")
+                    ->orWhere("email", "like", "%{$search}%")
+                ;
+            })
+            ->when($queryParams["filter"] ?? null, function ($query, $criterion) {
+                 
+                if (array_key_exists("is_active", $criterion)) {
+                    $value =filter_var($criterion["is_active"], FILTER_VALIDATE_BOOLEAN);
+                    $query->where("is_active", "=",  $value);
+
+                }
+                if (array_key_exists("role_id", $criterion)) {
+
+                    $query->where("role_id", "=", $criterion["role_id"]);
+
+                }
+            })
+            ->when($queryParams["sort-by"] ?? null, function ($query, $sortBy) use ($queryParams) {
+                $sortDir = $queryParams["sort-dir"] ?? "asc";
+                $query->orderBy($sortBy, $sortDir);
+            });
+    }
+
 }

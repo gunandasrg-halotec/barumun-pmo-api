@@ -24,8 +24,10 @@ class ResourceCollection extends BaseResourceCollecion
     {
         unset($default['links']);
         unset($default['meta']["links"]);
-        $default["pagination"] = $default["meta"];
-        unset($default["meta"]);
+        $default["meta"]["limit"] = $default["meta"]["per_page"];
+        $default["meta"]["page"] = $default["meta"]["current_page"];
+        unset($default["meta"]["per_page"]);
+        unset($default["meta"]["current_page"]);
         return $default;
     }
 }

@@ -1,0 +1,23 @@
+type: object
+properties:
+  id:
+    type: string
+  full_name:
+    type: string
+  email:
+    type: string
+    format: email
+  is_active:
+    type: boolean
+  role:
+    type: object
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+        format: name
+  created_at:
+    type: string
+    format: date-time
+

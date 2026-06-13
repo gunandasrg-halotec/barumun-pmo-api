@@ -2,62 +2,79 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Core\GetIndexRequest;
+use App\Core\Response200WithPagination;
+use App\Core\Response2xx;
+use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\UserRequest;
+use App\Http\Resources\UserResource;
 use App\Models\Role;
 use App\Models\User;
+use DB;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
-
+use OpenApi\Attributes as OA;
+use OpenApi\Attributes\RequestBody;
+use OpenApi\Attributes\Schema;
 class UserController extends Controller
 {
-    public function index(Request $request): JsonResponse
+    #[GetIndexRequest(
+        tags: [USER_TAG],
+        path: "/v1/users",
+        operationId: "UserController@index",
+        summary: "Show list of users. Only Administrator System able to run this action",
+        security: [Auth_JWT],
+
+        filters: [
+            new OA\Parameter(
+                in: "query",
+                name: "filter[role_id]",
+                description: "filter by role id",
+                schema: new Schema(type: "string", format: "uuid")
+
+            ),
+            new OA\Parameter(
+                in: "query",
+                name: "filter[is_active]",
+                description: "filter by active",
+                schema: new Schema(type: "boolean")
+            ),
+        ]
+    )]
+    #[Response200WithPagination(ref: "schemas/user_resource.yaml", description: "User list")]
+    #[ResponseDefault()]
+
+    public function index(UserRequest $request)
     {
-        $this->authorizeAdminSistem($request);
-
-        $query = User::with('role')->orderBy('full_name');
-
-        if ($request->filled('search')) {
-            $query->where(function ($q) use ($request) {
-                $q->where('full_name', 'like', '%' . $request->search . '%')
-                    ->orWhere('email', 'like', '%' . $request->search . '%');
-            });
-        }
-
-        if ($request->filled('role_id')) {
-            $query->where('role_id', $request->role_id);
-        }
-
-        if ($request->filled('is_active')) {
-            $query->where('is_active', (bool) $request->is_active);
-        }
-
-        $users = $query->paginate($request->get('limit', 20));
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Users fetched successfully',
-            'data' => $users->map(fn ($u) => $this->formatUser($u)),
-            'meta' => [
-                'page' => $users->currentPage(),
-                'limit' => $users->perPage(),
-                'total' => $users->total(),
-            ],
-        ]);
+        $models = UserResource::collection(User::
+            accounts($request->only(["search", "filter", "sort-by", "sort-dir"]))
+            ->paginate());
+        return $models;
     }
 
-    public function store(Request $request): JsonResponse
-    {
-        $this->authorizeAdminSistem($request);
+    #[OA\Post(
+        tags: [USER_TAG],
+        path: "/v1/user",
+        operationId: "UserController@store",
+        summary: "Create new User. Only Administrator System able to run this action",
 
-        $validated = $request->validate([
-            'full_name' => ['required', 'string', 'min:3', 'max:150'],
-            'email' => ['required', 'email', 'unique:users,email'],
-            'password' => ['required', 'string', 'min:8'],
-            'role_id' => ['required', 'uuid', 'exists:roles,id'],
-            'is_active' => ['sometimes', 'boolean'],
-        ]);
+        requestBody: new OA\RequestBody(
+            content: new OA\JsonContent(
+                ref: "schemas/new_user_request.yaml"
+            )
+
+        ),
+        security: [Auth_JWT]
+
+    )]
+    #[Response2xx(201, "User created", ref: "schemas/user_resource.yaml")]
+    #[ResponseDefault()]
+    public function store(UserRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
 
         $user = User::create([
             'full_name' => $validated['full_name'],
@@ -68,23 +85,36 @@ class UserController extends Controller
         ]);
 
         return response()->json([
-            'success' => true,
-            'message' => 'User created successfully',
-            'data' => $this->formatUser($user->load('role')),
+            'data' => new UserResource($user),
         ], 201);
     }
 
-    public function update(Request $request, User $user): JsonResponse
-    {
-        $this->authorizeAdminSistem($request);
 
-        $validated = $request->validate([
-            'full_name' => ['sometimes', 'string', 'min:3', 'max:150'],
-            'email' => ['sometimes', 'email', Rule::unique('users', 'email')->ignore($user->id)],
-            'password' => ['sometimes', 'nullable', 'string', 'min:8'],
-            'role_id' => ['sometimes', 'uuid', 'exists:roles,id'],
-            'is_active' => ['sometimes', 'boolean'],
-        ]);
+    #[OA\Put(
+        tags: [USER_TAG],
+        path: "/v1/user/{user}",
+        operationId: "UserController@update",
+        summary: "Update user data. Only Administrator System able to run this action",
+        parameters: [
+            new OA\Parameter(
+                in: "path",
+                name: "user",
+                schema: new Schema(type: 'string', format: "uuid")
+            )
+        ],
+        requestBody: new RequestBody(
+            content: new OA\JsonContent(ref: "schemas/update_user.yaml")
+        ),
+        security: [Auth_JWT]
+
+    )]
+    #[Response2xx(description: "User data updated.")]
+    #[ResponseDefault()]
+    public function update(UserRequest $request, User $user)
+    {
+        // $this->authorizeAdminSistem($request);
+
+        $validated = $request->validated();
 
         if (isset($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
@@ -97,29 +127,10 @@ class UserController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'User updated successfully',
-            'data' => $this->formatUser($user->fresh('role')),
+            'data' => new UserResource($user)
         ]);
     }
 
-    private function authorizeAdminSistem(Request $request): void
-    {
-        if (!$request->user()->isAdministratorSistem()) {
-            abort(403, 'Only Administrator Sistem can manage users.');
-        }
-    }
 
-    private function formatUser(User $user): array
-    {
-        return [
-            'id' => $user->id,
-            'full_name' => $user->full_name,
-            'email' => $user->email,
-            'is_active' => $user->is_active,
-            'role' => [
-                'id' => $user->role->id,
-                'name' => $user->role->role_name,
-            ],
-            'created_at' => $user->created_at,
-        ];
-    }
+
 }

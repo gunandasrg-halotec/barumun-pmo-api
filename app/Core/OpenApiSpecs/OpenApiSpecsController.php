@@ -68,7 +68,7 @@ class OpenApiSpecsController
     {
 
 
-        $finder = new \OpenApi\SourceFinder($this->paths, ["BqTableToolController.php"]);
+        $finder = new \OpenApi\SourceFinder($this->paths, ["ActualCostController.php"]);
 
         $openapi = (new \OpenApi\Generator())->generate($finder);
         $currentEnv = 'DEVELOPMENT';
