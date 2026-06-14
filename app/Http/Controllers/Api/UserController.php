@@ -90,7 +90,7 @@ class UserController extends Controller
     }
 
 
-    #[OA\Put(
+    #[OA\Patch(
         tags: [USER_TAG],
         path: "/v1/user/{user}",
         operationId: "UserController@update",
