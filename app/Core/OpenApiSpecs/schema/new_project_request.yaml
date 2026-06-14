@@ -1,0 +1,11 @@
+type: object
+allOf: 
+  - $ref: base_project.yaml
+required:
+  - project_code
+  - project_name
+  - client_name
+  - location
+  - start_date
+  - end_date
+

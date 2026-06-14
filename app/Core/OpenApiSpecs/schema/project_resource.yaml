@@ -1,0 +1,25 @@
+type: object
+allOf:
+  - $ref: base_project.yaml
+properties:
+  id:
+    type: string
+    format: uuid
+    example: "019ec7a0-fa2d-71e2-96f8-adaaeba1614e"
+  has_active_baseline:
+    type: boolean
+    example: false
+  active_wbd_version:
+    type: string
+    nullable: true
+    example: null
+  created_by:
+    $ref: creator.yaml
+  created_at:
+    type: string
+    format: date-time
+    example: "2026-06-14T19:34:36.000000Z"
+  updated_at:
+    type: string
+    format: date-time
+    example: "2026-06-14T19:34:36.000000Z"
