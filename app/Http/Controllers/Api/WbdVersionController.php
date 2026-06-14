@@ -2,18 +2,40 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Core\GetIndexRequest;
+use App\Core\Response200WithPagination;
+use App\Core\Response2xx;
+use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\WbdVersionRequest;
+use App\Http\Resources\WbdVersionResource;
 use App\Models\Project;
 use App\Models\WbdVersion;
 use App\Services\WbdService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
+use OpenApi\Attributes as OA;
+use OpenApi\Attributes\Schema;
 
 class WbdVersionController extends Controller
 {
     public function __construct(private WbdService $wbdService) {}
 
-    public function index(Request $request, Project $project): JsonResponse
+    // ─── GET /v1/projects/{project}/wbd-versions ─────────────────────────────
+
+    #[OA\Get(
+        tags: [WBD_TAG],
+        path: "/v1/projects/{project}/wbd-versions",
+        operationId: "WbdVersionController@index",
+        summary: "List all WBD versions for a project. All authenticated users.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "project", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "WBD version list")]
+    #[ResponseDefault()]
+    public function index(WbdVersionRequest $request, Project $project): JsonResponse
     {
         $versions = $project->wbdVersions()
             ->with(['submittedByUser', 'approvedByUser', 'rejectedByUser'])
@@ -23,20 +45,30 @@ class WbdVersionController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'WBD versions fetched successfully',
-            'data' => $versions->map(fn ($v) => $this->formatVersion($v)),
+            'data'    => WbdVersionResource::collection($versions),
         ]);
     }
 
-    public function store(Request $request, Project $project): JsonResponse
+    // ─── POST /v1/projects/{project}/wbd-versions ────────────────────────────
+
+    #[OA\Post(
+        tags: [WBD_TAG],
+        path: "/v1/projects/{project}/wbd-versions",
+        operationId: "WbdVersionController@store",
+        summary: "Create a new DRAFT WBD version. Optionally copy nodes from an existing version. Allowed: PM, Admin Proyek.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "project", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        requestBody: new OA\RequestBody(
+            content: new OA\JsonContent(ref: "schemas/new_wbd_version_request.yaml")
+        ),
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(response: "201", description: "WBD draft version created")]
+    #[ResponseDefault()]
+    public function store(WbdVersionRequest $request, Project $project): JsonResponse
     {
-        if (!$request->user()->canManageWbd()) {
-            abort(403, 'You do not have permission to create WBD versions.');
-        }
-
-        $request->validate([
-            'based_on_version_id' => ['nullable', 'uuid', 'exists:wbd_versions,id'],
-        ]);
-
         $version = $this->wbdService->createDraftVersion(
             $project,
             $request->based_on_version_id,
@@ -46,102 +78,144 @@ class WbdVersionController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'WBD draft version created successfully',
-            'data' => $this->formatVersion($version->load(['submittedByUser', 'approvedByUser'])),
+            'data'    => new WbdVersionResource($version->load(['submittedByUser', 'approvedByUser'])),
         ], 201);
     }
 
-    public function show(Request $request, WbdVersion $wbdVersion): JsonResponse
+    // ─── GET /v1/wbd-versions/pending ────────────────────────────────────────
+
+    #[OA\Get(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/pending",
+        operationId: "WbdVersionController@pending",
+        summary: "List all WBD versions pending Direksi approval (global, all projects). Allowed: Direksi.",
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Pending WBD versions")]
+    #[ResponseDefault()]
+    public function pending(WbdVersionRequest $request): JsonResponse
     {
-        $wbdVersion->load(['submittedByUser', 'approvedByUser', 'rejectedByUser', 'project']);
+        $versions = WbdVersion::with(['project', 'submittedByUser'])
+            ->where('status', 'PENDING_DIRECTOR_APPROVAL')
+            ->orderByDesc('updated_at')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pending WBD versions fetched successfully',
+            'data'    => WbdVersionResource::collection($versions),
+        ]);
+    }
+
+    // ─── GET /v1/wbd-versions/{wbdVersion} ───────────────────────────────────
+
+    #[OA\Get(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}",
+        operationId: "WbdVersionController@show",
+        summary: "Get WBD version detail. All authenticated users.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "WBD version detail")]
+    #[ResponseDefault()]
+    public function show(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
+    {
+        $wbdVersion->load(['project', 'submittedByUser', 'approvedByUser', 'rejectedByUser']);
 
         return response()->json([
             'success' => true,
             'message' => 'WBD version detail fetched successfully',
-            'data' => $this->formatVersion($wbdVersion, true),
+            'data'    => new WbdVersionResource($wbdVersion),
         ]);
     }
 
-    public function submit(Request $request, WbdVersion $wbdVersion): JsonResponse
-    {
-        if (!$request->user()->canManageWbd()) {
-            abort(403, 'You do not have permission to submit WBD for approval.');
-        }
+    // ─── POST /v1/wbd-versions/{wbdVersion}/submit ───────────────────────────
 
+    #[OA\Post(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/submit",
+        operationId: "WbdVersionController@submit",
+        summary: "Submit a DRAFT WBD version for Direksi approval. Allowed: PM, Admin Proyek.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "WBD version submitted for approval")]
+    #[ResponseDefault()]
+    public function submit(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
+    {
         $version = $this->wbdService->submitForApproval($wbdVersion, $request->user()->id);
 
         return response()->json([
             'success' => true,
             'message' => 'WBD version submitted for Direksi approval',
-            'data' => $this->formatVersion($version->load(['submittedByUser'])),
+            'data'    => new WbdVersionResource($version->load(['submittedByUser'])),
         ]);
     }
 
-    public function approve(Request $request, WbdVersion $wbdVersion): JsonResponse
-    {
-        if (!$request->user()->canApproveWbd()) {
-            abort(403, 'Only Direksi can approve WBD versions.');
-        }
+    // ─── POST /v1/wbd-versions/{wbdVersion}/approve ──────────────────────────
 
+    #[OA\Post(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/approve",
+        operationId: "WbdVersionController@approve",
+        summary: "Approve a WBD version and set it as active baseline. Allowed: Direksi only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "WBD version approved and set as active baseline")]
+    #[ResponseDefault()]
+    public function approve(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
+    {
         $version = $this->wbdService->approveVersion($wbdVersion, $request->user()->id);
 
         return response()->json([
             'success' => true,
             'message' => 'WBD version approved and set as active baseline',
-            'data' => $this->formatVersion($version->load(['approvedByUser'])),
+            'data'    => new WbdVersionResource($version->load(['approvedByUser'])),
         ]);
     }
 
-    public function reject(Request $request, WbdVersion $wbdVersion): JsonResponse
+    // ─── POST /v1/wbd-versions/{wbdVersion}/reject ───────────────────────────
+
+    #[OA\Post(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/reject",
+        operationId: "WbdVersionController@reject",
+        summary: "Reject a WBD version with a reason. Allowed: Direksi only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(ref: "schemas/reject_reason_request.yaml")
+        ),
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "WBD version rejected")]
+    #[ResponseDefault()]
+    public function reject(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
     {
-        if (!$request->user()->canApproveWbd()) {
-            abort(403, 'Only Direksi can reject WBD versions.');
-        }
-
-        $request->validate([
-            'reason' => ['required', 'string', 'min:5'],
-        ]);
-
         $version = $this->wbdService->rejectVersion(
             $wbdVersion,
             $request->user()->id,
-            $request->reason
+            $request->validated('reason')
         );
 
         return response()->json([
             'success' => true,
             'message' => 'WBD version rejected',
-            'data' => $this->formatVersion($version->load(['rejectedByUser'])),
+            'data'    => new WbdVersionResource($version->load(['rejectedByUser'])),
         ]);
-    }
-
-    private function formatVersion(WbdVersion $version, bool $detail = false): array
-    {
-        $data = [
-            'id' => $version->id,
-            'project_id' => $version->project_id,
-            'version_number' => $version->version_number,
-            'status' => $version->status,
-            'is_active' => $version->is_active,
-            'based_on_version_id' => $version->based_on_version_id,
-            'submitted_by' => $version->submittedByUser ? [
-                'id' => $version->submittedByUser->id,
-                'full_name' => $version->submittedByUser->full_name,
-            ] : null,
-            'submitted_at' => $version->submitted_at,
-            'approved_by' => $version->approvedByUser ? [
-                'id' => $version->approvedByUser->id,
-                'full_name' => $version->approvedByUser->full_name,
-            ] : null,
-            'approved_at' => $version->approved_at,
-            'rejected_by' => $version->rejectedByUser ? [
-                'id' => $version->rejectedByUser->id,
-                'full_name' => $version->rejectedByUser->full_name,
-            ] : null,
-            'rejected_at' => $version->rejected_at,
-            'rejection_reason' => $version->rejection_reason,
-            'created_at' => $version->created_at,
-        ];
-
-        return $data;
     }
 }
