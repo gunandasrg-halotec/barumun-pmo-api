@@ -8,6 +8,6 @@ Route::get("/v1/users", [UserController::class,"index"])
 Route::post("/v1/user", [UserController::class,"store"])
     ->name("user_controller.store")
     ->middleware('jwtAuth');
-Route::put("/v1/user/{user}", [UserController::class,"update"])
+Route::patch("/v1/user/{user}", [UserController::class,"update"])
     ->name("user_controller.update")
     ->middleware('jwtAuth');
