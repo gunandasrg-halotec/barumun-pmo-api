@@ -2,87 +2,138 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Core\GetIndexRequest;
+use App\Core\Response200WithPagination;
+use App\Core\Response2xx;
+use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ProgressRequest;
+use App\Http\Resources\ProgressResource;
 use App\Models\ProgressEntry;
 use App\Models\Project;
 use App\Models\WbdNode;
 use App\Services\ProgressService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
+use OpenApi\Attributes as OA;
+use OpenApi\Attributes\Schema;
 
 class ProgressController extends Controller
 {
     public function __construct(private ProgressService $progressService) {}
 
-    public function index(Request $request, Project $project): JsonResponse
+    // ─── GET /v1/projects/{project}/progress-entries ─────────────────────────
+
+    #[GetIndexRequest(
+        tags: [PROGRESS_TAG],
+        path: "/v1/projects/{project}/progress-entries",
+        operationId: "ProgressController@index",
+        summary: "List progress entries for a project. All authenticated users.",
+        security: [Auth_JWT],
+        parameters: [
+            "/v1/projects/{project}",
+        ],
+        filters: [
+            new OA\Parameter(in: "query", name: "filter[status]",
+                description: "Filter by status",
+                schema: new Schema(type: "string",
+                    enum: ["PENDING_PM_APPROVAL", "AUTO_APPROVED", "APPROVED", "REJECTED"])),
+            new OA\Parameter(in: "query", name: "filter[wbd_node_id]",
+                description: "Filter by WBD node UUID",
+                schema: new Schema(type: "string", format: "uuid")),
+            new OA\Parameter(in: "query", name: "filter[date_from]",
+                description: "From date (YYYY-MM-DD)",
+                schema: new Schema(type: "string", format: "date")),
+            new OA\Parameter(in: "query", name: "filter[date_to]",
+                description: "To date (YYYY-MM-DD)",
+                schema: new Schema(type: "string", format: "date")),
+        ]
+    )]
+    #[Response200WithPagination(ref: "schemas/progress_resource.yaml", description: "Progress entry list")]
+    #[ResponseDefault()]
+    public function index(ProgressRequest $request, Project $project): JsonResponse
     {
-        $query = ProgressEntry::with([
-            'wbdNode', 'enteredByUser.role', 'approvedByUser', 'rejectedByUser',
-            'actualCostTransactions',
-        ])
+        $query = ProgressEntry::with(['wbdNode', 'enteredByUser.role', 'approvedByUser', 'rejectedByUser'])
             ->where('project_id', $project->id)
             ->orderByDesc('progress_date');
 
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
+        $filter = $request->input('filter', []);
+
+        if (!empty($filter['status'])) {
+            $query->where('status', $filter['status']);
+        }
+        if (!empty($filter['wbd_node_id'])) {
+            $query->where('wbd_node_id', $filter['wbd_node_id']);
+        }
+        if (!empty($filter['date_from'])) {
+            $query->whereDate('progress_date', '>=', $filter['date_from']);
+        }
+        if (!empty($filter['date_to'])) {
+            $query->whereDate('progress_date', '<=', $filter['date_to']);
         }
 
-        if ($request->filled('date_from')) {
-            $query->whereDate('progress_date', '>=', $request->date_from);
-        }
-
-        if ($request->filled('date_to')) {
-            $query->whereDate('progress_date', '<=', $request->date_to);
-        }
-
-        if ($request->filled('wbd_node_id')) {
-            $query->where('wbd_node_id', $request->wbd_node_id);
-        }
-
-        $entries = $query->paginate($request->get('limit', 20));
+        $entries = $query->paginate($request->get('per-page', 20));
 
         return response()->json([
             'success' => true,
             'message' => 'Progress entries fetched successfully',
-            'data' => $entries->map(fn ($e) => $this->formatProgress($e)),
-            'meta' => [
-                'page' => $entries->currentPage(),
+            'data'    => ProgressResource::collection($entries),
+            'meta'    => [
+                'page'  => $entries->currentPage(),
                 'limit' => $entries->perPage(),
                 'total' => $entries->total(),
             ],
         ]);
     }
 
-    public function store(Request $request, Project $project): JsonResponse
+    // ─── POST /v1/projects/{project}/progress-entries ────────────────────────
+
+    #[OA\Post(
+        tags: [PROGRESS_TAG],
+        path: "/v1/projects/{project}/progress-entries",
+        operationId: "ProgressController@store",
+        summary: "Create a progress entry. PM → AUTO_APPROVED. Admin Proyek → PENDING_PM_APPROVAL. Requires active baseline.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "project", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(ref: "schemas/new_progress_request.yaml")
+        ),
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(response: "201", description: "Progress entry created")]
+    #[ResponseDefault()]
+    public function store(ProgressRequest $request, Project $project): JsonResponse
     {
-        if (!$request->user()->canInputProgress()) {
-            abort(403, 'You do not have permission to create progress entries.');
-        }
+        $data = $request->validated();
+        $node = WbdNode::findOrFail($data['wbd_node_id']);
 
-        $validated = $request->validate([
-            'wbd_node_id' => ['required', 'uuid', 'exists:wbd_nodes,id'],
-            'progress_date' => ['required', 'date'],
-            'progress_volume' => ['required', 'numeric', 'gt:0'],
-            'note' => ['nullable', 'string'],
-        ]);
-
-        $node = WbdNode::findOrFail($validated['wbd_node_id']);
-
-        $entry = $this->progressService->createProgress(
-            $project,
-            $node,
-            $validated,
-            $request->user()
-        );
+        $entry = $this->progressService->createProgress($project, $node, $data, $request->user());
 
         return response()->json([
             'success' => true,
             'message' => 'Progress entry created successfully',
-            'data' => $this->formatProgress($entry),
+            'data'    => new ProgressResource($entry),
         ], 201);
     }
 
-    public function show(Request $request, ProgressEntry $progressEntry): JsonResponse
+    // ─── GET /v1/progress-entries/{progressEntry} ────────────────────────────
+
+    #[OA\Get(
+        tags: [PROGRESS_TAG],
+        path: "/v1/progress-entries/{progressEntry}",
+        operationId: "ProgressController@show",
+        summary: "Get progress entry detail with linked cost transactions.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "progressEntry", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Progress entry detail")]
+    #[ResponseDefault()]
+    public function show(ProgressRequest $request, ProgressEntry $progressEntry): JsonResponse
     {
         $progressEntry->load([
             'project', 'wbdNode', 'enteredByUser.role',
@@ -92,84 +143,67 @@ class ProgressController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Progress entry fetched successfully',
-            'data' => $this->formatProgress($progressEntry, true),
+            'data'    => new ProgressResource($progressEntry),
         ]);
     }
 
-    public function approve(Request $request, ProgressEntry $progressEntry): JsonResponse
+    // ─── POST /v1/progress-entries/{progressEntry}/approve ───────────────────
+
+    #[OA\Post(
+        tags: [PROGRESS_TAG],
+        path: "/v1/progress-entries/{progressEntry}/approve",
+        operationId: "ProgressController@approve",
+        summary: "Approve a PENDING_PM_APPROVAL progress entry. Allowed: Project Manager only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "progressEntry", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Progress entry approved")]
+    #[ResponseDefault()]
+    public function approve(ProgressRequest $request, ProgressEntry $progressEntry): JsonResponse
     {
         $entry = $this->progressService->approveProgress($progressEntry, $request->user());
 
         return response()->json([
             'success' => true,
-            'message' => 'Progress approved successfully',
-            'data' => $this->formatProgress($entry->load(['approvedByUser'])),
+            'message' => 'Progress entry approved successfully',
+            'data'    => new ProgressResource($entry->load(['approvedByUser', 'wbdNode', 'enteredByUser.role'])),
         ]);
     }
 
-    public function reject(Request $request, ProgressEntry $progressEntry): JsonResponse
-    {
-        $request->validate([
-            'reason' => ['required', 'string', 'min:5'],
-        ]);
+    // ─── POST /v1/progress-entries/{progressEntry}/reject ────────────────────
 
+    #[OA\Post(
+        tags: [PROGRESS_TAG],
+        path: "/v1/progress-entries/{progressEntry}/reject",
+        operationId: "ProgressController@reject",
+        summary: "Reject a PENDING_PM_APPROVAL progress entry. Allowed: Project Manager only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "progressEntry", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(ref: "schemas/reject_reason_request.yaml")
+        ),
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Progress entry rejected")]
+    #[ResponseDefault()]
+    public function reject(ProgressRequest $request, ProgressEntry $progressEntry): JsonResponse
+    {
         $entry = $this->progressService->rejectProgress(
             $progressEntry,
             $request->user(),
-            $request->reason
+            $request->validated('reason')
         );
 
         return response()->json([
             'success' => true,
-            'message' => 'Progress rejected',
-            'data' => $this->formatProgress($entry->load(['rejectedByUser'])),
+            'message' => 'Progress entry rejected',
+            'data'    => new ProgressResource($entry->load(['rejectedByUser', 'wbdNode', 'enteredByUser.role'])),
         ]);
-    }
-
-    private function formatProgress(ProgressEntry $entry, bool $detail = false): array
-    {
-        $data = [
-            'id' => $entry->id,
-            'project_id' => $entry->project_id,
-            'wbd_node' => $entry->wbdNode ? [
-                'id' => $entry->wbdNode->id,
-                'code' => $entry->wbdNode->code,
-                'name' => $entry->wbdNode->name,
-                'unit' => $entry->wbdNode->unit,
-            ] : null,
-            'progress_date' => $entry->progress_date?->toDateString(),
-            'progress_volume' => $entry->progress_volume,
-            'note' => $entry->note,
-            'entered_by' => $entry->enteredByUser ? [
-                'id' => $entry->enteredByUser->id,
-                'full_name' => $entry->enteredByUser->full_name,
-                'role' => $entry->enteredByUser->role?->role_name,
-            ] : null,
-            'status' => $entry->status,
-            'is_official' => $entry->isOfficial(),
-            'approved_by' => $entry->approvedByUser ? [
-                'id' => $entry->approvedByUser->id,
-                'full_name' => $entry->approvedByUser->full_name,
-            ] : null,
-            'approved_at' => $entry->approved_at,
-            'rejected_by' => $entry->rejectedByUser ? [
-                'id' => $entry->rejectedByUser->id,
-                'full_name' => $entry->rejectedByUser->full_name,
-            ] : null,
-            'rejected_at' => $entry->rejected_at,
-            'rejection_reason' => $entry->rejection_reason,
-            'created_at' => $entry->created_at,
-        ];
-
-        if ($detail && $entry->relationLoaded('actualCostTransactions')) {
-            $data['actual_costs'] = $entry->actualCostTransactions->map(fn ($c) => [
-                'id' => $c->id,
-                'amount' => $c->amount,
-                'status' => $c->status,
-                'transaction_date' => $c->transaction_date?->toDateString(),
-            ])->toArray();
-        }
-
-        return $data;
     }
 }
