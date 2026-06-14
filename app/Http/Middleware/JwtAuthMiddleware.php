@@ -30,6 +30,7 @@ class JwtAuthMiddleware
 
         try {
             JWTAuth::parseToken()->authenticate();
+
             $user = Auth::user();
             if (!$user->is_active) {
                 Auth::logout();
@@ -39,6 +40,8 @@ class JwtAuthMiddleware
         } catch (TokenExpiredException $e) {
             try {
                 $token = JWTAuth::parseToken()->refresh();
+                //set expired token for this request.
+                $request->headers->set('Authorization', "Bearer {$token}");
                 $response = $next($request);
                 $response->headers->set('Authorization', "Bearer {$token}");
                 return $response;
@@ -51,7 +54,7 @@ class JwtAuthMiddleware
             $message = "User already logged out; reason: {$reason}.";
             abort(401, $message);
         } catch (Exception $e) {
-            
+
             if (App::isProduction()) {
                 abort(401, "Unauthorized Request. Please Login first");
             }
