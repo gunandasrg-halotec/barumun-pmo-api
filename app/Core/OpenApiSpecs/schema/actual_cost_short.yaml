@@ -1,0 +1,17 @@
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+    example: "b574cf40-ea56-429b-9a9e-b7749c5f9a9e"
+  amount:
+    type: number
+    format: float
+    example: 1250000.00
+  status:
+    type: string
+    example: "PAID"
+  transaction_date:
+    type: string
+    format: date
+    example: "2026-06-14"

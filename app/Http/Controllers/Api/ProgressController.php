@@ -19,7 +19,9 @@ use OpenApi\Attributes\Schema;
 
 class ProgressController extends Controller
 {
-    public function __construct(private ProgressService $progressService) {}
+    public function __construct(private ProgressService $progressService)
+    {
+    }
 
     // ─── GET /v1/projects/{project}/progress-entries ─────────────────────────
 
@@ -33,19 +35,33 @@ class ProgressController extends Controller
             "/v1/projects/{project}",
         ],
         filters: [
-            new OA\Parameter(in: "query", name: "filter[status]",
+            new OA\Parameter(
+                in: "query",
+                name: "filter[status]",
                 description: "Filter by status",
-                schema: new Schema(type: "string",
-                    enum: ["PENDING_PM_APPROVAL", "AUTO_APPROVED", "APPROVED", "REJECTED"])),
-            new OA\Parameter(in: "query", name: "filter[wbd_node_id]",
+                schema: new Schema(
+                    type: "string",
+                    enum: ["PENDING_PM_APPROVAL", "AUTO_APPROVED", "APPROVED", "REJECTED"]
+                )
+            ),
+            new OA\Parameter(
+                in: "query",
+                name: "filter[wbd_node_id]",
                 description: "Filter by WBD node UUID",
-                schema: new Schema(type: "string", format: "uuid")),
-            new OA\Parameter(in: "query", name: "filter[date_from]",
+                schema: new Schema(type: "string", format: "uuid")
+            ),
+            new OA\Parameter(
+                in: "query",
+                name: "filter[date_from]",
                 description: "From date (YYYY-MM-DD)",
-                schema: new Schema(type: "string", format: "date")),
-            new OA\Parameter(in: "query", name: "filter[date_to]",
+                schema: new Schema(type: "string", format: "date")
+            ),
+            new OA\Parameter(
+                in: "query",
+                name: "filter[date_to]",
                 description: "To date (YYYY-MM-DD)",
-                schema: new Schema(type: "string", format: "date")),
+                schema: new Schema(type: "string", format: "date")
+            ),
         ]
     )]
     #[Response200WithPagination(ref: "schemas/progress_resource.yaml", description: "Progress entry list")]
@@ -76,9 +92,9 @@ class ProgressController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Progress entries fetched successfully',
-            'data'    => ProgressResource::collection($entries),
-            'meta'    => [
-                'page'  => $entries->currentPage(),
+            'data' => ProgressResource::collection($entries),
+            'meta' => [
+                'page' => $entries->currentPage(),
                 'limit' => $entries->perPage(),
                 'total' => $entries->total(),
             ],
@@ -93,8 +109,12 @@ class ProgressController extends Controller
         operationId: "ProgressController@store",
         summary: "Create a progress entry. PM → AUTO_APPROVED. Admin Proyek → PENDING_PM_APPROVAL. Requires active baseline.",
         parameters: [
-            new OA\Parameter(in: "path", name: "project", required: true,
-                schema: new Schema(type: "string", format: "uuid")),
+            new OA\Parameter(
+                in: "path",
+                name: "project",
+                required: true,
+                schema: new Schema(type: "string", format: "uuid")
+            ),
         ],
         requestBody: new OA\RequestBody(
             required: true,
@@ -114,7 +134,7 @@ class ProgressController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Progress entry created successfully',
-            'data'    => new ProgressResource($entry),
+            'data' => new ProgressResource($entry),
         ], 201);
     }
 
@@ -126,24 +146,32 @@ class ProgressController extends Controller
         operationId: "ProgressController@show",
         summary: "Get progress entry detail with linked cost transactions.",
         parameters: [
-            new OA\Parameter(in: "path", name: "progressEntry", required: true,
-                schema: new Schema(type: "string", format: "uuid")),
+            new OA\Parameter(
+                in: "path",
+                name: "progressEntry",
+                required: true,
+                schema: new Schema(type: "string", format: "uuid")
+            ),
         ],
         security: [Auth_JWT]
     )]
-    #[Response2xx(description: "Progress entry detail")]
+    #[Response2xx(description: "Progress entry detail", ref: "schemas/progress_resource.yaml")]
     #[ResponseDefault()]
     public function show(ProgressRequest $request, ProgressEntry $progressEntry): JsonResponse
     {
         $progressEntry->load([
-            'project', 'wbdNode', 'enteredByUser.role',
-            'approvedByUser', 'rejectedByUser', 'actualCostTransactions.enteredByUser',
+            'project',
+            'wbdNode',
+            'enteredByUser.role',
+            'approvedByUser',
+            'rejectedByUser',
+            'actualCostTransactions.enteredByUser',
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'Progress entry fetched successfully',
-            'data'    => new ProgressResource($progressEntry),
+            'data' => new ProgressResource($progressEntry),
         ]);
     }
 
@@ -155,12 +183,16 @@ class ProgressController extends Controller
         operationId: "ProgressController@approve",
         summary: "Approve a PENDING_PM_APPROVAL progress entry. Allowed: Project Manager only.",
         parameters: [
-            new OA\Parameter(in: "path", name: "progressEntry", required: true,
-                schema: new Schema(type: "string", format: "uuid")),
+            new OA\Parameter(
+                in: "path",
+                name: "progressEntry",
+                required: true,
+                schema: new Schema(type: "string", format: "uuid")
+            ),
         ],
         security: [Auth_JWT]
     )]
-    #[Response2xx(description: "Progress entry approved")]
+    #[Response2xx(description: "Progress entry approved",  ref: "schemas/progress_resource.yaml")]
     #[ResponseDefault()]
     public function approve(ProgressRequest $request, ProgressEntry $progressEntry): JsonResponse
     {
@@ -169,7 +201,7 @@ class ProgressController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Progress entry approved successfully',
-            'data'    => new ProgressResource($entry->load(['approvedByUser', 'wbdNode', 'enteredByUser.role'])),
+            'data' => new ProgressResource($entry->load(['approvedByUser', 'wbdNode', 'enteredByUser.role'])),
         ]);
     }
 
@@ -181,8 +213,12 @@ class ProgressController extends Controller
         operationId: "ProgressController@reject",
         summary: "Reject a PENDING_PM_APPROVAL progress entry. Allowed: Project Manager only.",
         parameters: [
-            new OA\Parameter(in: "path", name: "progressEntry", required: true,
-                schema: new Schema(type: "string", format: "uuid")),
+            new OA\Parameter(
+                in: "path",
+                name: "progressEntry",
+                required: true,
+                schema: new Schema(type: "string", format: "uuid")
+            ),
         ],
         requestBody: new OA\RequestBody(
             required: true,
@@ -190,7 +226,7 @@ class ProgressController extends Controller
         ),
         security: [Auth_JWT]
     )]
-    #[Response2xx(description: "Progress entry rejected")]
+    #[Response2xx(description: "Progress entry rejected",  ref: "schemas/progress_resource.yaml")]
     #[ResponseDefault()]
     public function reject(ProgressRequest $request, ProgressEntry $progressEntry): JsonResponse
     {
@@ -203,7 +239,7 @@ class ProgressController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Progress entry rejected',
-            'data'    => new ProgressResource($entry->load(['rejectedByUser', 'wbdNode', 'enteredByUser.role'])),
+            'data' => new ProgressResource($entry->load(['rejectedByUser', 'wbdNode', 'enteredByUser.role'])),
         ]);
     }
 }

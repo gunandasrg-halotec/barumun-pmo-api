@@ -1,0 +1,8 @@
+type: object
+properties:
+  reject:
+    type: string
+    min: 5
+    max: 1000
+required:
+  - reject
