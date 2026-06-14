@@ -27,6 +27,8 @@ echo "Optimizing Laravel framework caches..."
 # php artisan config:cache
 # php artisan route:cache
 
+composer install 
+
 # Launch Nginx and PHP-FPM processes via Supervisor
 echo "Launching Nginx and PHP-FPM processes..."
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
