@@ -17,6 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 use OpenApi\Attributes\RequestBody;
 use OpenApi\Attributes\Schema;
@@ -125,6 +126,27 @@ class UserController extends Controller
     {
         $validated = $request->validated();
 
+
+        //what is current user role?
+        $roleCode = $user->role->code;
+        
+        if ($roleCode == RoleName::ADMINISTRATOR_SISTEM->name) {
+            //check how many administrator system there without this user;
+            
+            $adminCount = User::where("role_id", "=", $user->role->id)
+                ->where("id", "<>", $user->id)
+                ->count();
+                
+            if ($adminCount == 0) {
+                throw ValidationException::withMessages([
+                    "role_id" => [
+                        "This user is the only {$user->role->role_name->value} right now. You can't remove it"
+                    ]
+                ]);
+            }
+
+        }
+        
         if (isset($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
         } else {
