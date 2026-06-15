@@ -1,0 +1,8 @@
+type: object
+properties:
+  full_name:
+    type: string
+    max: 200
+  phone:
+    type: string
+    max: 30

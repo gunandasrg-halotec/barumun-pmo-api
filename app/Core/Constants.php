@@ -14,3 +14,4 @@ const FILE_CATEGORY_TAG = "File Category";
 const ANALYTICS_TAG = "Analytics";
 const REPORT_TAG = "Report";
 const AUDIT_TAG = "Audit Log";
+const PROFILE_TAG="User Profile";
