@@ -24,11 +24,12 @@ class User extends Authenticatable implements JWTSubject, IAuthenticatable
         'email',
         'password',
         'is_active',
+        'phone',
+        'last_login_at'
     ];
 
     protected $hidden = [
-        'password',
-        'remember_token',
+        'password'
     ];
 
     protected function casts(): array
@@ -36,6 +37,7 @@ class User extends Authenticatable implements JWTSubject, IAuthenticatable
         return [
             'password' => 'hashed',
             'is_active' => 'boolean',
+            'last_login_at' => 'datetime'
         ];
     }
 
@@ -44,34 +46,34 @@ class User extends Authenticatable implements JWTSubject, IAuthenticatable
         return $this->belongsTo(Role::class);
     }
 
-    public function hasRole(string $roleName): bool
+    public function hasRole(RoleName $roleName): bool
     {
         return $this->role?->role_name === $roleName;
     }
 
     public function isAdministratorSistem(): bool
     {
-        return $this->hasRole(RoleName::ADMINISTRATOR_SISTEM->value);
+        return $this->hasRole(RoleName::ADMINISTRATOR_SISTEM);
     }
 
     public function isProjectManager(): bool
     {
-        return $this->hasRole(RoleName::PROJECT_MANAGER->value);
+        return $this->hasRole(RoleName::PROJECT_MANAGER);
     }
 
     public function isDireksi(): bool
     {
-        return $this->hasRole(RoleName::DIREKSI->value);
+        return $this->hasRole(RoleName::DIREKSI);
     }
 
     public function isFinance(): bool
     {
-        return $this->hasRole(RoleName::FINANCE->value);
+        return $this->hasRole(RoleName::FINANCE);
     }
 
     public function isAdminProyek(): bool
     {
-        return $this->hasRole(RoleName::ADMIN_PROYEK->value);
+        return $this->hasRole(RoleName::ADMIN_PROYEK);
     }
 
     public function canInputProgress(): bool
@@ -139,20 +141,27 @@ class User extends Authenticatable implements JWTSubject, IAuthenticatable
     {
         $query
             ->when($queryParams["search"] ?? null, function ($query, $search) {
-                $query->where("full_name", "like", "%{$search}%")
-                    ->orWhere("email", "like", "%{$search}%")
-                ;
+                $query->where(function ($query) use ($search) {
+                    $query->where("full_name", "like", "%{$search}%")
+                        ->orWhere("email", "like", "%{$search}%")
+                    ;
+                });
+
             })
             ->when($queryParams["filter"] ?? null, function ($query, $criterion) {
-                 
+
                 if (array_key_exists("is_active", $criterion)) {
-                    $value =filter_var($criterion["is_active"], FILTER_VALIDATE_BOOLEAN);
-                    $query->where("is_active", "=",  $value);
+                    $value = filter_var($criterion["is_active"], FILTER_VALIDATE_BOOLEAN);
+                    $query->where("is_active", "=", $value);
 
                 }
-                if (array_key_exists("role_id", $criterion)) {
+                if (array_key_exists("role", $criterion)) {
 
-                    $query->where("role_id", "=", $criterion["role_id"]);
+                    //get the id from database
+                    $roleCase = constant(RoleName::class . "::" . $criterion["role"]);
+                    $theRole = Role::where("role_name", "=", $roleCase->value)->first();
+
+                    $query->where("role_id", "=", $theRole->id);
 
                 }
             })
