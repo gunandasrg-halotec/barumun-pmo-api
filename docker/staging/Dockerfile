@@ -44,12 +44,15 @@ COPY . /var/www/html
  RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
  RUN chmod -R a+rw /var/www/html/storage /var/www/html/bootstrap/cache
 
+RUN git config --global --add safe.directory /var/www/html
+
 # Copy and prepare entrypoint automation script
 COPY ./docker/staging/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 
 RUN sed -i 's|;chdir = /var/www|chdir = /var/www/html|g' /usr/local/etc/php-fpm.d/www.conf
+
 
 
 
