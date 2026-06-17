@@ -12,12 +12,14 @@ echo "Rebuilding and restarting docker containers..."
 docker compose -f staging-compose.yaml --env-file ./docker/staging/.env.dev  up -d --build
 
 # run composer
-docker exec -it pmo-backend-dev composer update
+docker exec -i pmo-backend-dev composer update
 
 # run migration
 
-docker exec -it pmo-backend-dev php artisan migrate
+docker exec -i pmo-backend-dev php artisan migrate
 
 
 
 echo "Application updated successfully!"
+
+date > last_update.txt
