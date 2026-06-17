@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\ActualCostController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\FileCategoryController;
+use App\Http\Controllers\Api\GanttController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\ProjectFileController;
 use App\Http\Controllers\Api\ReportController;
@@ -100,7 +101,7 @@ Route::middleware('jwtAuth')->group(function () {
 
     // Analytics (read-only, all roles)
     Route::get('/v1/projects/{project}/dashboard', [AnalyticsController::class, 'dashboard']);
-    Route::get('/v1/projects/{project}/gantt', [AnalyticsController::class, 'gantt']);
+    Route::get('/v1/projects/{project}/gantt', [GanttController::class, 'index']);
     Route::get('/v1/projects/{project}/s-curve', [AnalyticsController::class, 'sCurve']);
     Route::get('/v1/projects/{project}/cost-analysis', [AnalyticsController::class, 'costAnalysis']);
 

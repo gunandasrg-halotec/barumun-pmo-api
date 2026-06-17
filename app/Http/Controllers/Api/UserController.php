@@ -88,11 +88,20 @@ class UserController extends Controller
     {
         $validated = $request->validated();
 
+        // Resolve role name (e.g. "ADMIN_PROYEK") -> role_id, matching update().
+        $roleName = $validated['role'] ?? RoleName::ADMIN_PROYEK->name;
+        $roleCase = constant(RoleName::class . "::" . $roleName);
+        $theRole = Role::where("role_name", "=", $roleCase->value)->first();
+        if (!$theRole) {
+            abort(500, "ROLE WAS NOT FOUND IN DATABASE! ");
+        }
+
         $user = User::create([
             'full_name' => $validated['full_name'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
-            'role_id' => $validated['role_id'],
+            'phone' => $validated['phone'] ?? null,
+            'role_id' => $theRole->id,
             'is_active' => $validated['is_active'] ?? true,
         ]);
 
