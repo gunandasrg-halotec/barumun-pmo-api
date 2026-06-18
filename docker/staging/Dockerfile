@@ -46,6 +46,11 @@ COPY . /var/www/html
 
 RUN git config --global --add safe.directory /var/www/html
 
+RUN composer install 
+RUN echo "Compiling React frontend assets via Vite..."
+RUN npm run build
+
+
 # Copy and prepare entrypoint automation script
 COPY ./docker/staging/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

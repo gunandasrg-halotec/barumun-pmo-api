@@ -16,18 +16,17 @@ fi
 
 # Ensure PHP and JS dependencies are up to date
 # composer install --no-interaction --prefer-dist --optimize-autoloader
-npm install
+# npm install
 
 # Automate the React build process
-echo "Compiling React frontend assets via Vite..."
-npm run build
+
 
 # Cache Laravel configurations safely using the newly copied .env file
 echo "Optimizing Laravel framework caches..."
-# php artisan config:cache
-# php artisan route:cache
+ php artisan config:cache
+ php artisan route:cache
 
-composer install 
+
 
 # Launch Nginx and PHP-FPM processes via Supervisor
 echo "Launching Nginx and PHP-FPM processes..."
