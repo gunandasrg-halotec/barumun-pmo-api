@@ -11,9 +11,6 @@ echo "Rebuilding and restarting docker containers..."
 
 docker compose -f staging-compose.yaml --env-file ./docker/staging/.env.dev  up -d --build
 
-# run composer
-docker exec -i pmo-backend-dev composer update
-
 # run migration
 
 docker exec -i pmo-backend-dev php artisan migrate

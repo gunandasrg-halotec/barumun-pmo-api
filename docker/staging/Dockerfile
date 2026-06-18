@@ -41,13 +41,14 @@ RUN chown -R www-data:www-data /var/www/html
 COPY . /var/www/html
 
 # Fix folder permissions for Alpine's default web user (nobody)
- RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
- RUN chmod -R a+rw /var/www/html/storage /var/www/html/bootstrap/cache
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+RUN chmod -R a+rw /var/www/html/storage /var/www/html/bootstrap/cache
 
 RUN git config --global --add safe.directory /var/www/html
 
 RUN composer install 
 RUN echo "Compiling React frontend assets via Vite..."
+RUN npm ci
 RUN npm run build
 
 
