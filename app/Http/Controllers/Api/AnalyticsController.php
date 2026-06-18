@@ -253,10 +253,26 @@ class AnalyticsController extends Controller
             ];
         });
 
+        $flatNodes = $analysis->map(function ($node) {
+            return array_merge($node, [
+                'planned_cost' => $node['baseline_cost'],
+                'actual_cost'  => $node['actual_cost_approved'],
+            ]);
+        });
+
+        $totalActualCost = $flatNodes->sum('actual_cost');
+
         return response()->json([
             'success' => true,
             'message' => 'Cost analysis fetched successfully',
-            'data'    => $analysis->values(),
+            'data'    => [
+                'items'   => $flatNodes->values(),
+                'groups'  => $flatNodes->where('node_type', 'GROUP')->values(),
+                'summary' => [
+                    'total_baseline_cost' => $totalBaselineCost,
+                    'total_actual_cost'   => $totalActualCost,
+                ],
+            ],
             'meta'    => [
                 'has_baseline'     => true,
                 'baseline_version' => $project->activeWbdVersion->version_number,

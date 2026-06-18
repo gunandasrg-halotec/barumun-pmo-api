@@ -90,7 +90,7 @@ class WbdNodeController extends Controller
         $plannedCost = 0;
 
         if (!empty($data['start_date']) && !empty($data['duration_days'])) {
-            $endDate = date('Y-m-d', strtotime($data['start_date'] . ' +' . ($data['duration_days'] - 1) . ' days'));
+            $endDate = \Carbon\Carbon::parse($data['start_date'])->addDays($data['duration_days'] - 1)->toDateString();
         }
 
         if ($data['node_type'] === 'ITEM') {
@@ -158,7 +158,7 @@ class WbdNodeController extends Controller
             $startDate = $data['start_date']   ?? $wbdNode->start_date?->toDateString();
             $duration  = $data['duration_days'] ?? $wbdNode->duration_days;
             if ($startDate && $duration) {
-                $data['end_date'] = date('Y-m-d', strtotime($startDate . ' +' . ($duration - 1) . ' days'));
+                $data['end_date'] = \Carbon\Carbon::parse($startDate)->addDays($duration - 1)->toDateString();
             }
         }
 
