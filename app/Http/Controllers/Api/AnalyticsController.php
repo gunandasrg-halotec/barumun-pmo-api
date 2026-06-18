@@ -133,7 +133,9 @@ class AnalyticsController extends Controller
     #[ResponseDefault()]
     public function sCurve(Request $request, Project $project): JsonResponse
     {
-        // Approved progress by month
+        $project->load('activeWbdVersion');
+
+        // ── Actual series ─────────────────────────────────────────────────────
         $progressByMonth = ProgressEntry::where('project_id', $project->id)
             ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
             ->selectRaw("DATE_FORMAT(progress_date, '%Y-%m') as period, SUM(progress_volume) as volume")
@@ -142,7 +144,6 @@ class AnalyticsController extends Controller
             ->get()
             ->keyBy('period');
 
-        // Approved cost by month
         $costByMonth = ActualCostTransaction::where('project_id', $project->id)
             ->where('status', 'APPROVED')
             ->selectRaw("DATE_FORMAT(transaction_date, '%Y-%m') as period, SUM(amount) as amount")
@@ -151,35 +152,112 @@ class AnalyticsController extends Controller
             ->get()
             ->keyBy('period');
 
-        // Union of all periods
-        $allPeriods = $progressByMonth->keys()
-            ->merge($costByMonth->keys())
-            ->unique()
-            ->sort()
-            ->values();
+        // ── Planned series from WBD baseline ──────────────────────────────────
+        $planVolumeByMonth = [];
+        $planCostByMonth   = [];
+        $totalPlannedVolume = 0.0;
 
-        $cumulativeVolume = 0.0;
-        $cumulativeCost   = 0.0;
-        $series           = [];
+        if ($project->hasActiveBaseline()) {
+            $itemNodes = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
+                ->where('node_type', 'ITEM')
+                ->whereNotNull('start_date')
+                ->whereNotNull('end_date')
+                ->get();
+
+            foreach ($itemNodes as $node) {
+                $start        = \Carbon\Carbon::parse($node->start_date)->startOfMonth();
+                $end          = \Carbon\Carbon::parse($node->end_date)->startOfMonth();
+                $months       = $start->diffInMonths($end) + 1;
+                $volPerMonth  = $months > 0 ? ((float) $node->volume / $months) : 0;
+                $costPerMonth = $months > 0 ? ((float) $node->planned_cost / $months) : 0;
+                $totalPlannedVolume += (float) $node->volume;
+
+                $cur = $start->copy();
+                for ($i = 0; $i < $months; $i++) {
+                    $p = $cur->format('Y-m');
+                    $planVolumeByMonth[$p] = ($planVolumeByMonth[$p] ?? 0) + $volPerMonth;
+                    $planCostByMonth[$p]   = ($planCostByMonth[$p] ?? 0) + $costPerMonth;
+                    $cur->addMonth();
+                }
+            }
+            ksort($planVolumeByMonth);
+            ksort($planCostByMonth);
+        }
+
+        // ── Union of all periods ──────────────────────────────────────────────
+        $allPeriods = collect(array_merge(
+            $progressByMonth->keys()->toArray(),
+            $costByMonth->keys()->toArray(),
+            array_keys($planVolumeByMonth)
+        ))->unique()->sort()->values();
+
+        $cumActualVol  = 0.0;
+        $cumActualCost = 0.0;
+        $cumPlanVol    = 0.0;
+        $cumPlanCost   = 0.0;
+        $volumeCurve   = [];
+        $costCurve     = [];
 
         foreach ($allPeriods as $period) {
-            $cumulativeVolume += (float) ($progressByMonth[$period]->volume ?? 0);
-            $cumulativeCost   += (float) ($costByMonth[$period]->amount ?? 0);
+            $cumActualVol  += (float) ($progressByMonth[$period]->volume ?? 0);
+            $cumActualCost += (float) ($costByMonth[$period]->amount ?? 0);
+            $cumPlanVol    += (float) ($planVolumeByMonth[$period] ?? 0);
+            $cumPlanCost   += (float) ($planCostByMonth[$period] ?? 0);
 
-            $series[] = [
+            $actualVolPct = $totalPlannedVolume > 0
+                ? round(($cumActualVol / $totalPlannedVolume) * 100, 2)
+                : 0;
+            $planVolPct = $totalPlannedVolume > 0
+                ? round(($cumPlanVol / $totalPlannedVolume) * 100, 2)
+                : 0;
+
+            $volumeCurve[] = [
                 'period'            => $period,
-                'volume'            => (float) ($progressByMonth[$period]->volume ?? 0),
-                'cost'              => (float) ($costByMonth[$period]->amount ?? 0),
-                'cumulative_volume' => round($cumulativeVolume, 4),
-                'cumulative_cost'   => round($cumulativeCost, 2),
+                'plan_cumulative'   => $planVolPct,
+                'actual_cumulative' => $actualVolPct,
             ];
+
+            $costCurve[] = [
+                'period'            => $period,
+                'plan_cumulative'   => round($cumPlanCost, 2),
+                'actual_cumulative' => round($cumActualCost, 2),
+            ];
+        }
+
+        // ── Deviations: ITEM nodes with significant cost deviation ────────────
+        $deviations = [];
+        if ($project->hasActiveBaseline()) {
+            $actualCostByNode = DB::table('actual_cost_transactions as act')
+                ->join('progress_entries as pe', 'pe.id', '=', 'act.progress_entry_id')
+                ->where('act.project_id', $project->id)
+                ->where('act.status', 'APPROVED')
+                ->selectRaw('pe.wbd_node_id, SUM(act.amount) as total_actual')
+                ->groupBy('pe.wbd_node_id')
+                ->pluck('total_actual', 'wbd_node_id');
+
+            $deviations = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
+                ->where('node_type', 'ITEM')
+                ->get()
+                ->map(function ($n) use ($actualCostByNode) {
+                    $plan   = (float) $n->planned_cost;
+                    $actual = (float) ($actualCostByNode[$n->id] ?? 0);
+                    $dev    = $plan > 0 ? round((($actual - $plan) / $plan) * 100, 2) : 0;
+                    return ['name' => $n->name, 'code' => $n->code, 'deviation_percent' => $dev];
+                })
+                ->filter(fn ($d) => abs($d['deviation_percent']) >= 5)
+                ->sortByDesc(fn ($d) => abs($d['deviation_percent']))
+                ->values()
+                ->toArray();
         }
 
         return response()->json([
             'success' => true,
             'message' => 'S-Curve data fetched successfully',
             'data'    => [
-                'actual_series' => $series,
+                'volume_curve' => $volumeCurve,
+                'cost_curve'   => $costCurve,
+                'insights'     => [],
+                'deviations'   => $deviations,
             ],
         ]);
     }
