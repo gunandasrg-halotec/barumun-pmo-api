@@ -68,7 +68,7 @@ class ProgressController extends Controller
     #[ResponseDefault()]
     public function index(ProgressRequest $request, Project $project): JsonResponse
     {
-        $query = ProgressEntry::with(['wbdNode', 'enteredByUser.role', 'approvedByUser', 'rejectedByUser'])
+        $query = ProgressEntry::with(['wbdNode.parent', 'enteredByUser.role', 'approvedByUser', 'rejectedByUser'])
             ->where('project_id', $project->id)
             ->orderByDesc('progress_date');
 
@@ -161,7 +161,7 @@ class ProgressController extends Controller
     {
         $progressEntry->load([
             'project',
-            'wbdNode',
+            'wbdNode.parent',
             'enteredByUser.role',
             'approvedByUser',
             'rejectedByUser',
@@ -201,7 +201,7 @@ class ProgressController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Progress entry approved successfully',
-            'data' => new ProgressResource($entry->load(['approvedByUser', 'wbdNode', 'enteredByUser.role'])),
+            'data' => new ProgressResource($entry->load(['approvedByUser', 'wbdNode.parent', 'enteredByUser.role'])),
         ]);
     }
 
@@ -239,7 +239,7 @@ class ProgressController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Progress entry rejected',
-            'data' => new ProgressResource($entry->load(['rejectedByUser', 'wbdNode', 'enteredByUser.role'])),
+            'data' => new ProgressResource($entry->load(['rejectedByUser', 'wbdNode.parent', 'enteredByUser.role'])),
         ]);
     }
 }
