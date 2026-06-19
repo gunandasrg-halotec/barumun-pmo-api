@@ -31,4 +31,8 @@ Route::middleware('jwtAuth')->group(function () {
     // Archive (soft-delete) — uses DELETE verb
     Route::delete('/v1/files/{projectFile}', [ProjectFileController::class, 'destroy'])
         ->name('project-file.destroy');
+
+    // Binary download
+    Route::get('/v1/files/{projectFile}/download', [ProjectFileController::class, 'download'])
+        ->name('files.download');
 });

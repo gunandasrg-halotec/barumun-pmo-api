@@ -12,6 +12,8 @@ use App\Http\Resources\ProjectFileResource;
 use App\Models\Project;
 use App\Models\ProjectFile;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Storage;
 use OpenApi\Attributes as OA;
 use OpenApi\Attributes\Schema;
 
@@ -181,6 +183,18 @@ class ProjectFileController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'File archived successfully',
+        ]);
+    }
+
+    // ─── GET /v1/files/{projectFile}/download ─────────────────────────────────
+
+    public function download(ProjectFileRequest $request, ProjectFile $projectFile): Response
+    {
+        abort_unless(Storage::exists($projectFile->storage_path), 404, 'File not found on disk.');
+
+        return response(Storage::get($projectFile->storage_path), 200, [
+            'Content-Type'        => $projectFile->mime_type,
+            'Content-Disposition' => 'attachment; filename="' . $projectFile->original_file_name . '"',
         ]);
     }
 }

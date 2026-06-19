@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Core\ModelResource;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ProjectFileResource extends ModelResource
 {
@@ -30,6 +31,8 @@ class ProjectFileResource extends ModelResource
                 'full_name' => $this->uploadedByUser->full_name,
             ] : null),
             'uploaded_at'         => $this->uploaded_at,
+            'file_size'           => Storage::exists($this->storage_path) ? Storage::size($this->storage_path) : null,
+            'download_url'        => route('files.download', $this->id),
         ];
     }
 }
