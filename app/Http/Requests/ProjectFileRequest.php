@@ -13,7 +13,7 @@ class ProjectFileRequest extends FormRequest
         $method = $this->route()->getActionMethod();
 
         return match ($method) {
-            'index', 'show' => true,
+            'index', 'show', 'download' => true,
             'store', 'destroy' => $this->user()->canManageFiles(), // PM or Admin Proyek
             default => false,
         };
