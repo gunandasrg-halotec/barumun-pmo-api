@@ -34,4 +34,8 @@ Route::middleware('jwtAuth')->group(function () {
 
     Route::post('/v1/progress-entries/{progressEntry}/reject', [ProgressController::class, 'reject'])
         ->name('progress.reject');
+
+    // Attachment download
+    Route::get('/v1/progress-entries/{progressEntry}/attachment', [ProgressController::class, 'downloadAttachment'])
+        ->name('progress.attachment');
 });

@@ -14,6 +14,9 @@ use App\Models\Project;
 use App\Models\WbdNode;
 use App\Services\ProgressService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Storage;
 use OpenApi\Attributes as OA;
 use OpenApi\Attributes\Schema;
 
@@ -240,6 +243,24 @@ class ProgressController extends Controller
             'success' => true,
             'message' => 'Progress entry rejected',
             'data' => new ProgressResource($entry->load(['rejectedByUser', 'wbdNode.parent', 'enteredByUser.role'])),
+        ]);
+    }
+
+    // ─── GET /v1/progress-entries/{progressEntry}/attachment ─────────────────
+
+    public function downloadAttachment(Request $request, ProgressEntry $progressEntry): Response|JsonResponse
+    {
+        if (!$progressEntry->attachment_path || !Storage::disk('local')->exists($progressEntry->attachment_path)) {
+            return response()->json(['message' => 'Attachment not found'], 404);
+        }
+
+        $content  = Storage::disk('local')->get($progressEntry->attachment_path);
+        $mime     = Storage::disk('local')->mimeType($progressEntry->attachment_path);
+        $filename = basename($progressEntry->attachment_path);
+
+        return response($content, 200, [
+            'Content-Type'        => $mime ?: 'application/octet-stream',
+            'Content-Disposition' => 'inline; filename="' . $filename . '"',
         ]);
     }
 }
