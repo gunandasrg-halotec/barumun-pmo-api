@@ -97,6 +97,36 @@ class GanttController extends Controller
             ];
         });
 
+        // GROUP nodes have no start/end date in DB — derive from their ITEM descendants.
+        $indexed = $ganttData->keyBy('id')->toArray();
+
+        $ganttData = $ganttData->map(function ($row) use (&$indexed) {
+            if ($row['node_type'] !== 'GROUP' || ($row['start_date'] && $row['end_date'])) {
+                return $row;
+            }
+
+            // Collect all descendant start/end dates
+            $starts = [];
+            $ends   = [];
+            $stack  = [$row['id']];
+            while (!empty($stack)) {
+                $pid = array_pop($stack);
+                foreach ($indexed as $r) {
+                    if ($r['parent_node_id'] !== $pid) continue;
+                    if ($r['start_date']) $starts[] = $r['start_date'];
+                    if ($r['end_date'])   $ends[]   = $r['end_date'];
+                    $stack[] = $r['id'];
+                }
+            }
+
+            if (!empty($starts)) {
+                $row['start_date'] = min($starts);
+                $row['end_date']   = max($ends);
+            }
+
+            return $row;
+        });
+
         return response()->json([
             'success' => true,
             'message' => 'Gantt data fetched successfully',
