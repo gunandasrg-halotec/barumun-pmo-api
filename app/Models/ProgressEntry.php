@@ -25,6 +25,7 @@ class ProgressEntry extends Model
         'rejected_by',
         'rejected_at',
         'rejection_reason',
+        'attachment_path',
     ];
 
     protected function casts(): array

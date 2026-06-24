@@ -10,6 +10,7 @@ use App\Models\Project;
 use App\Models\User;
 use App\Models\WbdNode;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class ProgressService
 {
@@ -98,6 +99,13 @@ class ProgressService
                     'entered_by'        => $enteredBy->id,
                     'status'            => 'APPROVED',
                 ]);
+            }
+
+            // Store attachment if provided
+            if (!empty($data['attachment'])) {
+                $file = $data['attachment'];
+                $path = $file->store('progress-attachments/' . $project->id, 'local');
+                $progress->update(['attachment_path' => $path]);
             }
 
             $this->auditLog->logCreate('progress_entry', $progress->id, [
