@@ -68,7 +68,7 @@ class ProgressController extends Controller
     #[ResponseDefault()]
     public function index(ProgressRequest $request, Project $project): JsonResponse
     {
-        $query = ProgressEntry::with(['wbdNode.parent', 'enteredByUser.role', 'approvedByUser', 'rejectedByUser'])
+        $query = ProgressEntry::with(['wbdNode.parent', 'enteredByUser.role', 'approvedByUser', 'rejectedByUser', 'actualCostTransactions'])
             ->where('project_id', $project->id)
             ->orderByDesc('progress_date');
 

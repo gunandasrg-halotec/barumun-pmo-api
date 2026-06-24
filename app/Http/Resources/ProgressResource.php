@@ -42,6 +42,9 @@ class ProgressResource extends ModelResource
             ] : null),
             'rejected_at'      => $this->rejected_at,
             'rejection_reason' => $this->rejection_reason,
+            'actual_cost'      => $this->whenLoaded('actualCostTransactions',
+                fn () => (float) $this->actualCostTransactions->sum('amount')
+            ),
             'actual_costs'     => $this->whenLoaded('actualCostTransactions', fn () =>
                 $this->actualCostTransactions->map(fn ($c) => [
                     'id'               => $c->id,

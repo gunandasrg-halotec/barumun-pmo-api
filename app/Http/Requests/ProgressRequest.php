@@ -30,6 +30,7 @@ class ProgressRequest extends FormRequest
                 'wbd_node_id'     => ['required', 'uuid', 'exists:wbd_nodes,id'],
                 'progress_date'   => ['required', 'date'],
                 'progress_volume' => ['required', 'numeric', 'gt:0'],
+                'actual_cost'     => ['nullable', 'numeric', 'min:0'],
                 'note'            => ['nullable', 'string', 'max:2000'],
             ],
 

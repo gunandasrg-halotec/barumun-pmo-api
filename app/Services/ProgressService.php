@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\ProgressStatus;
 use App\Enums\RoleName;
+use App\Models\ActualCostTransaction;
 use App\Models\ProgressEntry;
 use App\Models\Project;
 use App\Models\User;
@@ -43,6 +44,26 @@ class ProgressService
             throw new \RuntimeException('Progress volume must be greater than 0.');
         }
 
+        // Guard: total volume (existing + new) must not exceed planned volume
+        if ($node->volume !== null && $node->volume > 0) {
+            $existingVolume = ProgressEntry::where('wbd_node_id', $node->id)
+                ->whereIn('status', [
+                    ProgressStatus::APPROVED->value,
+                    ProgressStatus::AUTO_APPROVED->value,
+                    ProgressStatus::PENDING_PM_APPROVAL->value,
+                ])
+                ->sum('progress_volume');
+
+            $remaining = $node->volume - $existingVolume;
+
+            if ($data['progress_volume'] > $remaining) {
+                throw new \RuntimeException(
+                    "Volume realisasi melebihi volume rencana. " .
+                    "Sisa volume yang dapat diinput: {$remaining} {$node->unit}."
+                );
+            }
+        }
+
         return DB::transaction(function () use ($project, $node, $data, $enteredBy) {
             $status = $enteredBy->isProjectManager()
                 ? ProgressStatus::AUTO_APPROVED->value
@@ -65,13 +86,27 @@ class ProgressService
                 ]);
             }
 
+            // Create cost transaction if actual_cost is provided
+            $actualCost = $data['actual_cost'] ?? null;
+            if ($actualCost !== null && $actualCost > 0) {
+                ActualCostTransaction::create([
+                    'project_id'        => $project->id,
+                    'progress_entry_id' => $progress->id,
+                    'amount'            => $actualCost,
+                    'transaction_date'  => $data['progress_date'],
+                    'description'       => $data['note'] ?? null,
+                    'entered_by'        => $enteredBy->id,
+                    'status'            => 'APPROVED',
+                ]);
+            }
+
             $this->auditLog->logCreate('progress_entry', $progress->id, [
                 'status' => $status,
                 'entered_by_role' => $enteredBy->role->role_name,
             ]);
 
             return $progress->fresh([
-                'project', 'wbdNode', 'enteredByUser.role', 'approvedByUser',
+                'project', 'wbdNode', 'enteredByUser.role', 'approvedByUser', 'actualCostTransactions',
             ]);
         });
     }
