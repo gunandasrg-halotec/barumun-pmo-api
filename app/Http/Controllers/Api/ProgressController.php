@@ -250,17 +250,28 @@ class ProgressController extends Controller
 
     public function downloadAttachment(Request $request, ProgressEntry $progressEntry): Response|JsonResponse
     {
-        if (!$progressEntry->attachment_path || !Storage::disk('local')->exists($progressEntry->attachment_path)) {
-            return response()->json(['message' => 'Attachment not found'], 404);
+        if (!$progressEntry->attachment_path) {
+            return response()->json(['message' => 'Entry ini tidak memiliki lampiran.'], 404);
         }
 
-        $content  = Storage::disk('local')->get($progressEntry->attachment_path);
-        $mime     = Storage::disk('local')->mimeType($progressEntry->attachment_path);
+        $disk = Storage::disk('local');
+
+        if (!$disk->exists($progressEntry->attachment_path)) {
+            \Log::warning('Progress attachment missing from disk', [
+                'progress_entry_id' => $progressEntry->id,
+                'attachment_path'   => $progressEntry->attachment_path,
+            ]);
+            return response()->json(['message' => 'File lampiran tidak ditemukan di server.'], 404);
+        }
+
+        $content  = $disk->get($progressEntry->attachment_path);
+        $mime     = $disk->mimeType($progressEntry->attachment_path) ?: 'application/octet-stream';
         $filename = basename($progressEntry->attachment_path);
 
         return response($content, 200, [
-            'Content-Type'        => $mime ?: 'application/octet-stream',
+            'Content-Type'        => $mime,
             'Content-Disposition' => 'inline; filename="' . $filename . '"',
+            'Cache-Control'       => 'private, max-age=3600',
         ]);
     }
 }
