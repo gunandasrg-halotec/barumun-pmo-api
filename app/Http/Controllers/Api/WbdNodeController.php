@@ -203,20 +203,24 @@ class WbdNodeController extends Controller
         }
 
         if ($wbdNode->progressEntries()->exists()) {
-            abort(422, 'Cannot delete a WBD node that has associated progress entries.');
+            abort(422, 'Node ini memiliki data realisasi progress dan tidak dapat dihapus.');
         }
 
-        if ($wbdNode->children()->exists()) {
-            abort(422, 'Cannot delete a WBD node that has children. Delete children first.');
-        }
-
-        $wbdNode->delete();
+        $this->deleteNodeRecursive($wbdNode);
         $this->wbdService->recalculate($version);
 
         return response()->json([
             'success' => true,
             'message' => 'WBD node deleted successfully',
         ]);
+    }
+
+    private function deleteNodeRecursive(WbdNode $node): void
+    {
+        foreach ($node->children as $child) {
+            $this->deleteNodeRecursive($child);
+        }
+        $node->delete();
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
