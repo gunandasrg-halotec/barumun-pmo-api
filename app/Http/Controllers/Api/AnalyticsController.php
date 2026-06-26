@@ -81,22 +81,70 @@ class AnalyticsController extends Controller
             ->where('status', 'REVIEW')
             ->count();
 
-        // Overall progress % — planned: realisasi/rencana, actual: realisasi/(realisasi+sisa)
-        $plannedVolume  = (float) WbdNode::where('wbd_version_id', $activeVersionId)
-            ->where('node_type', 'ITEM')
-            ->sum('volume');
-
+        // ── Realisasi totals ─────────────────────────────────────────────────────
         $approvedVolume = (float) ProgressEntry::where('project_id', $project->id)
             ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
             ->sum('progress_volume');
 
-        // Planned progress: realisasi / rencana
-        $plannedProgressPercent = $plannedVolume > 0
-            ? min(100, round(($approvedVolume / $plannedVolume) * 100, 2))
+        // ── Planned progress % from baseline schedule (volume & cost) ─────────
+        // Distribute each ITEM node's volume/cost linearly over start_date→end_date,
+        // then cumulate up to today to get "how much should have been done by now".
+        $today = \Carbon\Carbon::today();
+        $todayPeriod = $today->format('Y-m');
+
+        $itemNodes = WbdNode::where('wbd_version_id', $activeVersionId)
+            ->where('node_type', 'ITEM')
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->get();
+
+        $totalPlannedVolume    = 0.0;
+        $totalPlannedCost      = 0.0;
+        $scheduledVolToDate    = 0.0;
+        $scheduledCostToDate   = 0.0;
+
+        foreach ($itemNodes as $node) {
+            $start        = \Carbon\Carbon::parse($node->start_date)->startOfMonth();
+            $end          = \Carbon\Carbon::parse($node->end_date)->startOfMonth();
+            $months       = $start->diffInMonths($end) + 1;
+            $volPerMonth  = $months > 0 ? ((float) $node->volume / $months) : 0;
+            $costPerMonth = $months > 0 ? ((float) $node->planned_cost / $months) : 0;
+
+            $totalPlannedVolume += (float) $node->volume;
+            $totalPlannedCost   += (float) $node->planned_cost;
+
+            $cur = $start->copy();
+            for ($i = 0; $i < $months; $i++) {
+                if ($cur->format('Y-m') <= $todayPeriod) {
+                    $scheduledVolToDate  += $volPerMonth;
+                    $scheduledCostToDate += $costPerMonth;
+                }
+                $cur->addMonth();
+            }
+        }
+
+        // For nodes without schedule dates, add their full volume/cost to total
+        // but not to scheduled (they have no timeline basis).
+        $totalPlannedVolume += (float) WbdNode::where('wbd_version_id', $activeVersionId)
+            ->where('node_type', 'ITEM')
+            ->where(fn ($q) => $q->whereNull('start_date')->orWhereNull('end_date'))
+            ->sum('volume');
+        $totalPlannedCost += (float) WbdNode::where('wbd_version_id', $activeVersionId)
+            ->where('node_type', 'ITEM')
+            ->where(fn ($q) => $q->whereNull('start_date')->orWhereNull('end_date'))
+            ->sum('planned_cost');
+
+        // Planned % = scheduled-to-date / total planned
+        $plannedProgressPercent = $totalPlannedVolume > 0
+            ? min(100, round(($scheduledVolToDate / $totalPlannedVolume) * 100, 2))
             : 0;
 
-        // Actual progress: realisasi / (realisasi + sisa_volume_terbaru_per_node)
-        // Ambil remaining_volume dari entry terbaru (by progress_date) per node
+        $plannedCostPercent = $totalPlannedCost > 0
+            ? min(100, round(($scheduledCostToDate / $totalPlannedCost) * 100, 2))
+            : 0;
+
+        // ── Actual progress % (completion estimate) ───────────────────────────
+        // actual volume: realisasi / (realisasi + sisa terbaru per node)
         $latestRemainingByNode = DB::table('progress_entries as pe')
             ->join(DB::raw('(
                 SELECT wbd_node_id, MAX(progress_date) as max_date
@@ -114,15 +162,13 @@ class AnalyticsController extends Controller
             ->select('pe.wbd_node_id', 'pe.remaining_volume')
             ->get();
 
-        $totalRemainingVolume = $latestRemainingByNode->sum('remaining_volume');
-        $denominator = $approvedVolume + $totalRemainingVolume;
+        $totalRemainingVolume  = $latestRemainingByNode->sum('remaining_volume');
+        $volDenominator        = $approvedVolume + $totalRemainingVolume;
+        $actualProgressPercent = $volDenominator > 0
+            ? min(100, round(($approvedVolume / $volDenominator) * 100, 2))
+            : 0;
 
-        $overallProgressPercent = $plannedProgressPercent; // backward compat alias
-        $actualProgressPercent  = $denominator > 0
-            ? min(100, round(($approvedVolume / $denominator) * 100, 2))
-            : $plannedProgressPercent;
-
-        // Planned/actual cost progress
+        // actual cost: biaya_realisasi / (biaya_realisasi + sisa_biaya terbaru per node)
         $latestRemainingCostByNode = DB::table('progress_entries as pe')
             ->join(DB::raw('(
                 SELECT wbd_node_id, MAX(progress_date) as max_date
@@ -140,15 +186,16 @@ class AnalyticsController extends Controller
             ->select('pe.wbd_node_id', 'pe.remaining_cost')
             ->get();
 
-        $totalRemainingCost   = $latestRemainingCostByNode->sum('remaining_cost');
-        $costDenominator      = $totalApprovedCost + $totalRemainingCost;
-
-        $plannedCostPercent = $totalBaselineCost > 0
-            ? min(100, round(($totalApprovedCost / $totalBaselineCost) * 100, 2))
-            : 0;
-        $actualCostPercent  = $costDenominator > 0
+        $totalRemainingCost  = $latestRemainingCostByNode->sum('remaining_cost');
+        $costDenominator     = $totalApprovedCost + $totalRemainingCost;
+        $actualCostPercent   = $costDenominator > 0
             ? min(100, round(($totalApprovedCost / $costDenominator) * 100, 2))
-            : $plannedCostPercent;
+            : 0;
+
+        // Achievement rate (legacy): realisasi / total rencana
+        $overallProgressPercent = $totalPlannedVolume > 0
+            ? min(100, round(($approvedVolume / $totalPlannedVolume) * 100, 2))
+            : 0;
 
         $costDeviation = $totalApprovedCost - $totalBaselineCost;
 
