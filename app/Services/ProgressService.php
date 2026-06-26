@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ProgressStatus;
 use App\Enums\RoleName;
 use App\Models\ActualCostTransaction;
+use App\Models\Notification;
 use App\Models\ProgressEntry;
 use App\Models\Project;
 use App\Models\User;
@@ -43,6 +44,23 @@ class ProgressService
         // Guard: volume must be > 0
         if (($data['progress_volume'] ?? 0) <= 0) {
             throw new \RuntimeException('Progress volume must be greater than 0.');
+        }
+
+        // Guard: node sudah ditandai selesai (remaining_volume = 0)
+        $isCompleted = ProgressEntry::where('wbd_node_id', $node->id)
+            ->whereIn('status', [
+                ProgressStatus::APPROVED->value,
+                ProgressStatus::AUTO_APPROVED->value,
+                ProgressStatus::PENDING_PM_APPROVAL->value,
+            ])
+            ->whereNotNull('remaining_volume')
+            ->where('remaining_volume', 0)
+            ->exists();
+
+        if ($isCompleted) {
+            throw new \RuntimeException(
+                'Pekerjaan ini sudah ditandai selesai. Tidak dapat menambahkan progress baru.'
+            );
         }
 
         // Guard: total volume (existing + new) must not exceed planned volume
@@ -106,6 +124,58 @@ class ProgressService
                 $file = $data['attachment'];
                 $path = $file->store('progress-attachments/' . $project->id, 'local');
                 $progress->update(['attachment_path' => $path]);
+            }
+
+            // Handle remaining_volume: pakai nilai dari user, atau hitung otomatis
+            $remainingVolume = isset($data['remaining_volume']) && $data['remaining_volume'] !== ''
+                ? (float) $data['remaining_volume']
+                : ($node->volume !== null
+                    ? max(0, (float) $node->volume - (float) $data['progress_volume'])
+                    : null);
+
+            $progress->update(['remaining_volume' => $remainingVolume]);
+
+            // Kirim notifikasi ke Direktur jika realisasi + sisa > rencana
+            if (
+                $remainingVolume !== null &&
+                $node->volume !== null &&
+                ((float) $data['progress_volume'] + $remainingVolume) > (float) $node->volume
+            ) {
+                $directors = User::whereHas('role', fn ($q) =>
+                    $q->where('role_name', RoleName::DIREKSI->value)
+                )->get();
+
+                foreach ($directors as $director) {
+                    Notification::create([
+                        'user_id'      => $director->id,
+                        'triggered_by' => $enteredBy->id,
+                        'type'         => 'OVER_BUDGET_RISK',
+                        'title'        => 'Potensi Over Budget: ' . $node->name,
+                        'message'      => sprintf(
+                            '%s mencatat realisasi %s %s dengan estimasi sisa %s %s, ' .
+                            'melebihi rencana %s %s untuk item "%s" pada proyek "%s".',
+                            $enteredBy->full_name,
+                            number_format((float) $data['progress_volume'], 2, '.', ','),
+                            $node->unit,
+                            number_format($remainingVolume, 2, '.', ','),
+                            $node->unit,
+                            number_format((float) $node->volume, 2, '.', ','),
+                            $node->unit,
+                            $node->name,
+                            $project->name
+                        ),
+                        'data' => [
+                            'project_id'        => $project->id,
+                            'project_name'      => $project->name,
+                            'wbd_node_id'       => $node->id,
+                            'wbd_node_name'     => $node->name,
+                            'progress_entry_id' => $progress->id,
+                            'volume_plan'       => (float) $node->volume,
+                            'volume_actual'     => (float) $data['progress_volume'],
+                            'volume_remaining'  => $remainingVolume,
+                        ],
+                    ]);
+                }
             }
 
             $this->auditLog->logCreate('progress_entry', $progress->id, [

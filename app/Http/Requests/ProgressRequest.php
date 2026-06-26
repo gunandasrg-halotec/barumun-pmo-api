@@ -32,7 +32,8 @@ class ProgressRequest extends FormRequest
                 'progress_volume' => ['required', 'numeric', 'gt:0'],
                 'actual_cost'     => ['nullable', 'numeric', 'min:0'],
                 'note'            => ['nullable', 'string', 'max:2000'],
-                'attachment'      => ['nullable', 'file', 'max:10240', 'mimes:jpg,jpeg,png,pdf,doc,docx'],
+                'attachment'       => ['nullable', 'file', 'max:10240', 'mimes:jpg,jpeg,png,pdf,doc,docx'],
+                'remaining_volume' => ['nullable', 'numeric', 'min:0'],
             ],
 
             'reject' => [

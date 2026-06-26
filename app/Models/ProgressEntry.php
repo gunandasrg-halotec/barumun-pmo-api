@@ -26,15 +26,17 @@ class ProgressEntry extends Model
         'rejected_at',
         'rejection_reason',
         'attachment_path',
+        'remaining_volume',
     ];
 
     protected function casts(): array
     {
         return [
-            'progress_date' => 'date',
-            'approved_at' => 'datetime',
-            'rejected_at' => 'datetime',
-            'progress_volume' => 'decimal:4',
+            'progress_date'    => 'date',
+            'approved_at'      => 'datetime',
+            'rejected_at'      => 'datetime',
+            'progress_volume'  => 'decimal:4',
+            'remaining_volume' => 'decimal:4',
         ];
     }
 
