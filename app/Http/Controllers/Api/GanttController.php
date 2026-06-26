@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ProgressEntry;
 use App\Models\Project;
 use App\Models\WbdNode;
+use App\Models\WbdNodeDependency;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -64,6 +65,18 @@ class GanttController extends Controller
         }
 
         $nodes = $query->get();
+
+        // Load all dependencies for nodes in this version in one query
+        $nodeIds = $nodes->pluck('id');
+        $dependencies = WbdNodeDependency::whereIn('successor_node_id', $nodeIds)
+            ->orWhereIn('predecessor_node_id', $nodeIds)
+            ->get()
+            ->map(fn ($d) => [
+                'id'                  => $d->id,
+                'predecessor_node_id' => $d->predecessor_node_id,
+                'successor_node_id'   => $d->successor_node_id,
+                'dependency_type'     => $d->dependency_type,
+            ]);
 
         // Approved progress volume per node (official data only)
         $progressByNode = ProgressEntry::where('project_id', $project->id)
@@ -136,6 +149,7 @@ class GanttController extends Controller
                 'baseline_version' => $project->activeWbdVersion->version_number,
                 'is_read_only'     => true,
             ],
+            'dependencies' => $dependencies->values(),
         ]);
     }
 }

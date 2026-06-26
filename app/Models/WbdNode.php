@@ -66,6 +66,16 @@ class WbdNode extends Model
         return $this->hasMany(ProgressEntry::class);
     }
 
+    public function predecessorDependencies(): HasMany
+    {
+        return $this->hasMany(WbdNodeDependency::class, 'successor_node_id');
+    }
+
+    public function successorDependencies(): HasMany
+    {
+        return $this->hasMany(WbdNodeDependency::class, 'predecessor_node_id');
+    }
+
     public function isGroup(): bool
     {
         return $this->node_type === 'GROUP';

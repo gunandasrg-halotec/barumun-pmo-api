@@ -35,7 +35,7 @@ class WbdNodeController extends Controller
     #[ResponseDefault()]
     public function index(WbdNodeRequest $request, WbdVersion $wbdVersion): JsonResponse
     {
-        $nodes = $wbdVersion->nodes()->with('children')->get();
+        $nodes = $wbdVersion->nodes()->with(['children', 'predecessorDependencies.predecessor'])->get();
         $tree  = $this->buildTree($nodes);
 
         return response()->json([
@@ -233,6 +233,13 @@ class WbdNodeController extends Controller
                 $resource           = new WbdNodeResource($node);
                 $arr                = $resource->toArray(request());
                 $arr['children']    = $this->buildTree($nodes, $node->id);
+                $arr['predecessors'] = $node->predecessorDependencies->map(fn ($d) => [
+                    'id'              => $d->id,
+                    'predecessor_id'  => $d->predecessor_node_id,
+                    'code'            => $d->predecessor->code ?? '?',
+                    'name'            => $d->predecessor->name ?? '?',
+                    'dependency_type' => $d->dependency_type,
+                ])->values()->toArray();
                 return $arr;
             })
             ->values()
