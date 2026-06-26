@@ -63,6 +63,27 @@ class ProgressService
             );
         }
 
+        // Guard: progress_date tidak boleh lebih awal dari entry terbaru (berdasarkan progress_date)
+        $latestEntry = ProgressEntry::where('wbd_node_id', $node->id)
+            ->whereIn('status', [
+                ProgressStatus::APPROVED->value,
+                ProgressStatus::AUTO_APPROVED->value,
+                ProgressStatus::PENDING_PM_APPROVAL->value,
+            ])
+            ->orderByDesc('progress_date')
+            ->first();
+
+        if ($latestEntry && isset($data['progress_date'])) {
+            $newDate    = \Carbon\Carbon::parse($data['progress_date']);
+            $latestDate = \Carbon\Carbon::parse($latestEntry->progress_date);
+            if ($newDate->lt($latestDate)) {
+                throw new \RuntimeException(
+                    'Tanggal progress tidak boleh lebih awal dari entry terakhir (' .
+                    $latestDate->format('d M Y') . ').'
+                );
+            }
+        }
+
         // Guard: total volume (existing + new) must not exceed planned volume
         if ($node->volume !== null && $node->volume > 0) {
             $existingVolume = ProgressEntry::where('wbd_node_id', $node->id)
@@ -134,6 +155,15 @@ class ProgressService
                     : null);
 
             $progress->update(['remaining_volume' => $remainingVolume]);
+
+            // Handle remaining_cost: pakai nilai dari user, atau hitung otomatis (remaining_volume × rate)
+            $remainingCost = isset($data['remaining_cost']) && $data['remaining_cost'] !== ''
+                ? (float) $data['remaining_cost']
+                : ($remainingVolume !== null && $node->rate !== null
+                    ? round($remainingVolume * (float) $node->rate, 2)
+                    : null);
+
+            $progress->update(['remaining_cost' => $remainingCost]);
 
             // Kirim notifikasi ke Direktur jika realisasi + sisa > rencana
             if (

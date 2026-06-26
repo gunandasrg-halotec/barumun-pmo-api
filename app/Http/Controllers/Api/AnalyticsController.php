@@ -81,7 +81,7 @@ class AnalyticsController extends Controller
             ->where('status', 'REVIEW')
             ->count();
 
-        // Overall progress % — approved volume / planned volume across all ITEM nodes
+        // Overall progress % — planned: realisasi/rencana, actual: realisasi/(realisasi+sisa)
         $plannedVolume  = (float) WbdNode::where('wbd_version_id', $activeVersionId)
             ->where('node_type', 'ITEM')
             ->sum('volume');
@@ -90,9 +90,65 @@ class AnalyticsController extends Controller
             ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
             ->sum('progress_volume');
 
-        $overallProgressPercent = $plannedVolume > 0
+        // Planned progress: realisasi / rencana
+        $plannedProgressPercent = $plannedVolume > 0
             ? min(100, round(($approvedVolume / $plannedVolume) * 100, 2))
             : 0;
+
+        // Actual progress: realisasi / (realisasi + sisa_volume_terbaru_per_node)
+        // Ambil remaining_volume dari entry terbaru (by progress_date) per node
+        $latestRemainingByNode = DB::table('progress_entries as pe')
+            ->join(DB::raw('(
+                SELECT wbd_node_id, MAX(progress_date) as max_date
+                FROM progress_entries
+                WHERE project_id = \'' . $project->id . '\'
+                AND status IN (\'APPROVED\', \'AUTO_APPROVED\')
+                GROUP BY wbd_node_id
+            ) as latest'), function ($join) {
+                $join->on('pe.wbd_node_id', '=', 'latest.wbd_node_id')
+                     ->on('pe.progress_date', '=', 'latest.max_date');
+            })
+            ->where('pe.project_id', $project->id)
+            ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
+            ->whereNotNull('pe.remaining_volume')
+            ->select('pe.wbd_node_id', 'pe.remaining_volume')
+            ->get();
+
+        $totalRemainingVolume = $latestRemainingByNode->sum('remaining_volume');
+        $denominator = $approvedVolume + $totalRemainingVolume;
+
+        $overallProgressPercent = $plannedProgressPercent; // backward compat alias
+        $actualProgressPercent  = $denominator > 0
+            ? min(100, round(($approvedVolume / $denominator) * 100, 2))
+            : $plannedProgressPercent;
+
+        // Planned/actual cost progress
+        $latestRemainingCostByNode = DB::table('progress_entries as pe')
+            ->join(DB::raw('(
+                SELECT wbd_node_id, MAX(progress_date) as max_date
+                FROM progress_entries
+                WHERE project_id = \'' . $project->id . '\'
+                AND status IN (\'APPROVED\', \'AUTO_APPROVED\')
+                GROUP BY wbd_node_id
+            ) as latest'), function ($join) {
+                $join->on('pe.wbd_node_id', '=', 'latest.wbd_node_id')
+                     ->on('pe.progress_date', '=', 'latest.max_date');
+            })
+            ->where('pe.project_id', $project->id)
+            ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
+            ->whereNotNull('pe.remaining_cost')
+            ->select('pe.wbd_node_id', 'pe.remaining_cost')
+            ->get();
+
+        $totalRemainingCost   = $latestRemainingCostByNode->sum('remaining_cost');
+        $costDenominator      = $totalApprovedCost + $totalRemainingCost;
+
+        $plannedCostPercent = $totalBaselineCost > 0
+            ? min(100, round(($totalApprovedCost / $totalBaselineCost) * 100, 2))
+            : 0;
+        $actualCostPercent  = $costDenominator > 0
+            ? min(100, round(($totalApprovedCost / $costDenominator) * 100, 2))
+            : $plannedCostPercent;
 
         $costDeviation = $totalApprovedCost - $totalBaselineCost;
 
@@ -109,6 +165,10 @@ class AnalyticsController extends Controller
                     ? round(($costDeviation / $totalBaselineCost) * 100, 2)
                     : 0,
                 'overall_progress_percent'      => $overallProgressPercent,
+                'planned_progress_percent'      => $plannedProgressPercent,
+                'actual_progress_percent'       => $actualProgressPercent,
+                'planned_cost_percent'          => $plannedCostPercent,
+                'actual_cost_percent'           => $actualCostPercent,
                 'total_official_progress_count' => $officialProgressCount,
                 'pending_progress_approval'     => $pendingProgressCount,
                 'pending_cost_review'           => $pendingCostCount,

@@ -44,6 +44,7 @@ class ProgressResource extends ModelResource
             'rejection_reason' => $this->rejection_reason,
             'attachment_path'  => $this->attachment_path,
             'remaining_volume' => $this->remaining_volume !== null ? (float) $this->remaining_volume : null,
+            'remaining_cost'   => $this->remaining_cost !== null ? (float) $this->remaining_cost : null,
             'actual_cost'      => $this->whenLoaded('actualCostTransactions',
                 fn () => (float) $this->actualCostTransactions->sum('amount')
             ),

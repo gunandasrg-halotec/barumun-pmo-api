@@ -27,6 +27,7 @@ class ProgressEntry extends Model
         'rejection_reason',
         'attachment_path',
         'remaining_volume',
+        'remaining_cost',
     ];
 
     protected function casts(): array
@@ -37,6 +38,7 @@ class ProgressEntry extends Model
             'rejected_at'      => 'datetime',
             'progress_volume'  => 'decimal:4',
             'remaining_volume' => 'decimal:4',
+            'remaining_cost'   => 'decimal:2',
         ];
     }
 
