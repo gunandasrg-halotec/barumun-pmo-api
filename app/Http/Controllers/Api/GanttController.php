@@ -9,6 +9,7 @@ use App\Models\ProgressEntry;
 use App\Models\Project;
 use App\Models\WbdNode;
 use App\Models\WbdNodeDependency;
+use App\Models\WbdVersion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -48,16 +49,37 @@ class GanttController extends Controller
     {
         $project->load('activeWbdVersion');
 
-        if (!$project->hasActiveBaseline()) {
-            return response()->json([
-                'success' => true,
-                'message' => 'No active baseline. Gantt chart is unavailable.',
-                'data'    => [],
-                'meta'    => ['has_baseline' => false],
-            ]);
+        // Determine which WBD version to display
+        $requestedVersionId = $request->query('wbd_version_id');
+        $isActiveVersion    = true;
+        $versionLabel       = null;
+
+        if ($requestedVersionId) {
+            $wbdVersion = WbdVersion::where('id', $requestedVersionId)
+                ->where('project_id', $project->id)
+                ->first();
+
+            if (!$wbdVersion) {
+                return response()->json(['message' => 'WBD version not found.'], 404);
+            }
+
+            $versionId       = $wbdVersion->id;
+            $isActiveVersion = $wbdVersion->id === $project->active_wbd_version_id;
+            $versionLabel    = 'v' . $wbdVersion->version_number . ' (' . $wbdVersion->status . ')';
+        } else {
+            if (!$project->hasActiveBaseline()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'No active baseline. Gantt chart is unavailable.',
+                    'data'    => [],
+                    'meta'    => ['has_baseline' => false],
+                ]);
+            }
+            $versionId    = $project->active_wbd_version_id;
+            $versionLabel = 'v' . $project->activeWbdVersion->version_number . ' (aktif)';
         }
 
-        $query = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
+        $query = WbdNode::where('wbd_version_id', $versionId)
             ->orderBy('sort_order');
 
         if ($request->filled('node_type')) {
@@ -78,16 +100,20 @@ class GanttController extends Controller
                 'dependency_type'     => $d->dependency_type,
             ]);
 
-        // Approved progress volume per node (official data only)
-        $progressByNode = ProgressEntry::where('project_id', $project->id)
-            ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
-            ->selectRaw('wbd_node_id, SUM(progress_volume) as total_volume')
-            ->groupBy('wbd_node_id')
-            ->pluck('total_volume', 'wbd_node_id');
+        // Progress only available for the active baseline version
+        $progressByNode = [];
+        if ($isActiveVersion) {
+            $progressByNode = ProgressEntry::where('project_id', $project->id)
+                ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
+                ->selectRaw('wbd_node_id, SUM(progress_volume) as total_volume')
+                ->groupBy('wbd_node_id')
+                ->pluck('total_volume', 'wbd_node_id')
+                ->toArray();
+        }
 
-        $ganttData = $nodes->map(function ($node) use ($progressByNode) {
+        $ganttData = $nodes->map(function ($node) use ($progressByNode, $isActiveVersion) {
             $actualVolume    = (float) ($progressByNode[$node->id] ?? 0);
-            $progressPercent = ($node->volume && $node->volume > 0)
+            $progressPercent = ($isActiveVersion && $node->volume && $node->volume > 0)
                 ? min(100, round(($actualVolume / $node->volume) * 100, 2))
                 : 0;
 
@@ -145,9 +171,12 @@ class GanttController extends Controller
             'message' => 'Gantt data fetched successfully',
             'data'    => $ganttData,
             'meta'    => [
-                'has_baseline'     => true,
-                'baseline_version' => $project->activeWbdVersion->version_number,
-                'is_read_only'     => true,
+                'has_baseline'      => true,
+                'baseline_version'  => $project->activeWbdVersion?->version_number,
+                'is_read_only'      => true,
+                'is_active_version' => $isActiveVersion,
+                'version_label'     => $versionLabel,
+                'version_id'        => $versionId,
             ],
             'dependencies' => $dependencies->values(),
         ]);
