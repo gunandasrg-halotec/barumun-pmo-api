@@ -38,6 +38,7 @@ class ProjectResource extends ModelResource
                 'full_name' => $this->createdBy->full_name,
                 'role'      => $this->createdBy->role?->role_name,
             ] : null,
+            'submissions_reset_at' => $this->submissions_reset_at,
             'created_at'           => $this->created_at,
             'updated_at'           => $this->updated_at,
         ];

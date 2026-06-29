@@ -23,14 +23,16 @@ class Project extends Model
         'description',
         'active_wbd_version_id',
         'created_by',
+        'submissions_reset_at',
     ];
 
     protected function casts(): array
     {
         return [
-            'start_date' => 'date',
-            'end_date'   => 'date',
-            'status'     => ProjectStatus::class,
+            'start_date'           => 'date',
+            'end_date'             => 'date',
+            'status'               => ProjectStatus::class,
+            'submissions_reset_at' => 'datetime',
         ];
     }
 
