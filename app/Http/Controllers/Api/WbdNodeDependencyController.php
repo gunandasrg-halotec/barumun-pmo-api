@@ -62,6 +62,12 @@ class WbdNodeDependencyController extends Controller
         ], 201);
     }
 
+    // Trigger cascade from an already-updated predecessor (called after node date edit).
+    public function cascadeFrom(WbdNode $node): void
+    {
+        $this->cascadeSuccessors($node->fresh(), []);
+    }
+
     // DELETE /v1/wbd-node-dependencies/{dependency}
     public function destroy(WbdNodeDependency $dependency): JsonResponse
     {

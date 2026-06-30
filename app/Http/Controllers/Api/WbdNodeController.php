@@ -169,8 +169,15 @@ class WbdNodeController extends Controller
             $data['planned_cost'] = ($volume ?? 0) * ($rate ?? 0);
         }
 
+        $scheduleChanged = isset($data['start_date']) || isset($data['duration_days']);
+
         $wbdNode->update($data);
         $this->wbdService->recalculate($version);
+
+        // If dates changed, cascade to all dependency successors
+        if ($scheduleChanged) {
+            app(WbdNodeDependencyController::class)->cascadeFrom($wbdNode);
+        }
 
         return response()->json([
             'success' => true,
