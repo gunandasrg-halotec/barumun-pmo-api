@@ -242,9 +242,12 @@ class AnalyticsController extends Controller
     {
         $project->load('activeWbdVersion');
 
-        // ── Actual series ─────────────────────────────────────────────────────
+        // ── Actual series — only from active WBD version nodes ───────────────
+        $activeVersionId = $project->active_wbd_version_id;
+
         $progressByMonth = ProgressEntry::where('project_id', $project->id)
             ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
+            ->when($activeVersionId, fn ($q) => $q->whereHas('wbdNode', fn ($nq) => $nq->where('wbd_version_id', $activeVersionId)))
             ->selectRaw("DATE_FORMAT(progress_date, '%Y-%m') as period, SUM(progress_volume) as volume")
             ->groupBy('period')
             ->orderBy('period')
@@ -253,6 +256,7 @@ class AnalyticsController extends Controller
 
         $costByMonth = ActualCostTransaction::where('project_id', $project->id)
             ->where('status', 'APPROVED')
+            ->when($activeVersionId, fn ($q) => $q->whereHas('progressEntry.wbdNode', fn ($nq) => $nq->where('wbd_version_id', $activeVersionId)))
             ->selectRaw("DATE_FORMAT(transaction_date, '%Y-%m') as period, SUM(amount) as amount")
             ->groupBy('period')
             ->orderBy('period')
