@@ -71,8 +71,11 @@ class ProgressController extends Controller
     #[ResponseDefault()]
     public function index(ProgressRequest $request, Project $project): JsonResponse
     {
+        // Only show progress entries for nodes belonging to the active WBD version
+        $activeVersionId = $project->active_wbd_version_id;
         $query = ProgressEntry::with(['wbdNode.parent', 'enteredByUser.role', 'approvedByUser', 'rejectedByUser', 'actualCostTransactions'])
             ->where('project_id', $project->id)
+            ->when($activeVersionId, fn ($q) => $q->whereHas('wbdNode', fn ($nq) => $nq->where('wbd_version_id', $activeVersionId)))
             ->orderByDesc('progress_date');
 
         $filter = $request->input('filter', []);
