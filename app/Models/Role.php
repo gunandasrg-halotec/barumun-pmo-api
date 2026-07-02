@@ -34,21 +34,21 @@ class Role extends Model
 
     public function isProjectManager(): bool
     {
-        return $this->role_name === 'Project Manager';
+        return $this->role_name === RoleName::PROJECT_MANAGER;
     }
 
     public function isDireksi(): bool
     {
-        return $this->role_name === 'Direksi';
+        return $this->role_name === RoleName::DIREKSI;
     }
 
     public function isFinance(): bool
     {
-        return $this->role_name === 'Finance';
+        return $this->role_name === RoleName::FINANCE;
     }
 
     public function isAdminProyek(): bool
     {
-        return $this->role_name === 'Admin Proyek';
+        return $this->role_name === RoleName::ADMIN_PROYEK;
     }
 }

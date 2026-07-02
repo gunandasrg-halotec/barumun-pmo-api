@@ -23,7 +23,7 @@ class ProgressService
      * - project must have active baseline
      * - node must be ITEM type (operasional)
      * - Admin Proyek → PENDING_PM_APPROVAL
-     * - Project Manager → AUTO_APPROVED
+     * - Manajer Kebun → AUTO_APPROVED
      */
     public function createProgress(
         Project $project,
@@ -225,7 +225,7 @@ class ProgressService
 
     /**
      * Approve a pending progress entry.
-     * - PENDING_PM_APPROVAL → hanya Project Manager
+     * - PENDING_PM_APPROVAL → hanya Manajer Kebun
      * - PENDING_DIRECTOR_APPROVAL → hanya Direktur
      */
     public function approveProgress(ProgressEntry $progress, User $approvedBy): ProgressEntry
@@ -236,7 +236,7 @@ class ProgressService
             }
         } elseif ($progress->status === ProgressStatus::PENDING_PM_APPROVAL->value) {
             if (!$approvedBy->canApproveProgress()) {
-                throw new \RuntimeException('Only Project Manager can approve progress.');
+                throw new \RuntimeException('Only ' . RoleName::PROJECT_MANAGER->value . ' can approve progress.');
             }
         } else {
             throw new \RuntimeException('Progress tidak dalam status yang dapat disetujui.');
@@ -257,7 +257,7 @@ class ProgressService
 
     /**
      * Reject a pending progress entry.
-     * - PENDING_PM_APPROVAL → hanya Project Manager
+     * - PENDING_PM_APPROVAL → hanya Manajer Kebun
      * - PENDING_DIRECTOR_APPROVAL → hanya Direktur
      */
     public function rejectProgress(ProgressEntry $progress, User $rejectedBy, string $reason): ProgressEntry
@@ -268,7 +268,7 @@ class ProgressService
             }
         } elseif ($progress->status === ProgressStatus::PENDING_PM_APPROVAL->value) {
             if (!$rejectedBy->canApproveProgress()) {
-                throw new \RuntimeException('Only Project Manager can reject progress.');
+                throw new \RuntimeException('Only ' . RoleName::PROJECT_MANAGER->value . ' can reject progress.');
             }
         } else {
             throw new \RuntimeException('Progress tidak dalam status yang dapat ditolak.');

@@ -187,7 +187,7 @@ class ProgressController extends Controller
         tags: [PROGRESS_TAG],
         path: "/v1/progress-entries/{progressEntry}/approve",
         operationId: "ProgressController@approve",
-        summary: "Approve a PENDING_PM_APPROVAL progress entry. Allowed: Project Manager only.",
+        summary: "Approve a PENDING_PM_APPROVAL progress entry. Allowed: Manajer Kebun only.",
         parameters: [
             new OA\Parameter(
                 in: "path",
@@ -217,7 +217,7 @@ class ProgressController extends Controller
         tags: [PROGRESS_TAG],
         path: "/v1/progress-entries/{progressEntry}/reject",
         operationId: "ProgressController@reject",
-        summary: "Reject a PENDING_PM_APPROVAL progress entry. Allowed: Project Manager only.",
+        summary: "Reject a PENDING_PM_APPROVAL progress entry. Allowed: Manajer Kebun only.",
         parameters: [
             new OA\Parameter(
                 in: "path",

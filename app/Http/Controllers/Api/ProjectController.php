@@ -97,7 +97,7 @@ class ProjectController extends Controller
         tags: [PROJECT_TAG],
         path: "/v1/projects",
         operationId: "ProjectController@store",
-        summary: "Create a new project. Allowed roles: Project Manager, Admin Proyek, Administrator Sistem.",
+        summary: "Create a new project. Allowed roles: Manajer Kebun, Admin Proyek, Administrator Sistem.",
         requestBody: new OA\RequestBody(
             required: true,
             content: new OA\JsonContent(
@@ -131,7 +131,7 @@ class ProjectController extends Controller
         tags: [PROJECT_TAG],
         path: "/v1/projects/{project}",
         operationId: "ProjectController@update",
-        summary: "Update project data. Allowed roles: Project Manager, Admin Proyek, Administrator Sistem.",
+        summary: "Update project data. Allowed roles: Manajer Kebun, Admin Proyek, Administrator Sistem.",
         parameters: [
             new OA\Parameter(
                 in: "path",
