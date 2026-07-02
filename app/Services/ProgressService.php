@@ -84,30 +84,34 @@ class ProgressService
             }
         }
 
-        // Guard: total volume (existing + new) must not exceed planned volume
+        // Cek apakah volume melebihi rencana
+        $isOverVolume = false;
         if ($node->volume !== null && $node->volume > 0) {
             $existingVolume = ProgressEntry::where('wbd_node_id', $node->id)
                 ->whereIn('status', [
                     ProgressStatus::APPROVED->value,
                     ProgressStatus::AUTO_APPROVED->value,
                     ProgressStatus::PENDING_PM_APPROVAL->value,
+                    ProgressStatus::PENDING_DIRECTOR_APPROVAL->value,
                 ])
                 ->sum('progress_volume');
 
-            $remaining = $node->volume - $existingVolume;
+            $remaining = (float) $node->volume - (float) $existingVolume;
 
-            if ($data['progress_volume'] > $remaining) {
-                throw new \RuntimeException(
-                    "Volume realisasi melebihi volume rencana. " .
-                    "Sisa volume yang dapat diinput: {$remaining} {$node->unit}."
-                );
+            if ((float) $data['progress_volume'] > $remaining) {
+                $isOverVolume = true;
             }
         }
 
-        return DB::transaction(function () use ($project, $node, $data, $enteredBy) {
-            $status = $enteredBy->isProjectManager()
-                ? ProgressStatus::AUTO_APPROVED->value
-                : ProgressStatus::PENDING_PM_APPROVAL->value;
+        return DB::transaction(function () use ($project, $node, $data, $enteredBy, $isOverVolume) {
+            // Jika volume melebihi rencana → wajib persetujuan Direktur, tidak peduli role penginput
+            if ($isOverVolume) {
+                $status = ProgressStatus::PENDING_DIRECTOR_APPROVAL->value;
+            } elseif ($enteredBy->isProjectManager()) {
+                $status = ProgressStatus::AUTO_APPROVED->value;
+            } else {
+                $status = ProgressStatus::PENDING_PM_APPROVAL->value;
+            }
 
             $progress = ProgressEntry::create([
                 'project_id' => $project->id,
@@ -119,7 +123,7 @@ class ProgressService
                 'status' => $status,
             ]);
 
-            if ($enteredBy->isProjectManager()) {
+            if ($status === ProgressStatus::AUTO_APPROVED->value) {
                 $progress->update([
                     'approved_by' => $enteredBy->id,
                     'approved_at' => now(),
@@ -220,16 +224,22 @@ class ProgressService
     }
 
     /**
-     * Approve a pending progress entry (Project Manager only).
+     * Approve a pending progress entry.
+     * - PENDING_PM_APPROVAL → hanya Project Manager
+     * - PENDING_DIRECTOR_APPROVAL → hanya Direktur
      */
     public function approveProgress(ProgressEntry $progress, User $approvedBy): ProgressEntry
     {
-        if (!$approvedBy->canApproveProgress()) {
-            throw new \RuntimeException('Only Project Manager can approve progress.');
-        }
-
-        if (!$progress->isPendingApproval()) {
-            throw new \RuntimeException('Progress must be in PENDING_PM_APPROVAL status to be approved.');
+        if ($progress->status === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value) {
+            if (!$approvedBy->isDireksi()) {
+                throw new \RuntimeException('Hanya Direktur yang dapat menyetujui progress yang melebihi volume rencana.');
+            }
+        } elseif ($progress->status === ProgressStatus::PENDING_PM_APPROVAL->value) {
+            if (!$approvedBy->canApproveProgress()) {
+                throw new \RuntimeException('Only Project Manager can approve progress.');
+            }
+        } else {
+            throw new \RuntimeException('Progress tidak dalam status yang dapat disetujui.');
         }
 
         return DB::transaction(function () use ($progress, $approvedBy) {
@@ -246,16 +256,22 @@ class ProgressService
     }
 
     /**
-     * Reject a pending progress entry (Project Manager only).
+     * Reject a pending progress entry.
+     * - PENDING_PM_APPROVAL → hanya Project Manager
+     * - PENDING_DIRECTOR_APPROVAL → hanya Direktur
      */
     public function rejectProgress(ProgressEntry $progress, User $rejectedBy, string $reason): ProgressEntry
     {
-        if (!$rejectedBy->canApproveProgress()) {
-            throw new \RuntimeException('Only Project Manager can reject progress.');
-        }
-
-        if (!$progress->isPendingApproval()) {
-            throw new \RuntimeException('Progress must be in PENDING_PM_APPROVAL status to be rejected.');
+        if ($progress->status === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value) {
+            if (!$rejectedBy->isDireksi()) {
+                throw new \RuntimeException('Hanya Direktur yang dapat menolak progress yang melebihi volume rencana.');
+            }
+        } elseif ($progress->status === ProgressStatus::PENDING_PM_APPROVAL->value) {
+            if (!$rejectedBy->canApproveProgress()) {
+                throw new \RuntimeException('Only Project Manager can reject progress.');
+            }
+        } else {
+            throw new \RuntimeException('Progress tidak dalam status yang dapat ditolak.');
         }
 
         return DB::transaction(function () use ($progress, $rejectedBy, $reason) {
