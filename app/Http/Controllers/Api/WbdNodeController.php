@@ -94,7 +94,7 @@ class WbdNodeController extends Controller
         }
 
         if ($data['node_type'] === 'ITEM') {
-            $plannedCost = ($data['volume'] ?? 0) * ($data['rate'] ?? 0);
+            $plannedCost = round(($data['volume'] ?? 0) * ($data['rate'] ?? 0), 2);
         }
 
         $node = WbdNode::create([
@@ -166,7 +166,7 @@ class WbdNodeController extends Controller
         if (isset($data['volume']) || isset($data['rate'])) {
             $volume = $data['volume'] ?? $wbdNode->volume;
             $rate   = $data['rate']   ?? $wbdNode->rate;
-            $data['planned_cost'] = ($volume ?? 0) * ($rate ?? 0);
+            $data['planned_cost'] = round(($volume ?? 0) * ($rate ?? 0), 2);
         }
 
         $scheduleChanged = isset($data['start_date']) || isset($data['duration_days']);

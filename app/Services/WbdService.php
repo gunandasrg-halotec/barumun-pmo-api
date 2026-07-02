@@ -162,7 +162,7 @@ class WbdService
     private function recalculateNodeCost(WbdNode $node, $allNodes): float
     {
         if ($node->isItem()) {
-            $cost = ($node->volume ?? 0) * ($node->rate ?? 0);
+            $cost = round(($node->volume ?? 0) * ($node->rate ?? 0), 2);
             $node->update(['planned_cost' => $cost]);
             return $cost;
         }
