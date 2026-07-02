@@ -17,7 +17,7 @@ class ProgressRequest extends FormRequest
         return match ($method) {
             'index', 'show'    => true,
             'store'            => $user->canInputProgress(),
-            'approve', 'reject'=> $user->canApproveProgress(),
+            'approve', 'reject'=> $user->canApproveProgress() || $user->isDireksi(),
             default            => false,
         };
     }
