@@ -2,141 +2,162 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Core\GetIndexRequest;
+use App\Core\Response200WithPagination;
+use App\Core\Response2xx;
+use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ProjectRequest;
+use App\Http\Resources\ProjectResource;
 use App\Models\Project;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use OpenApi\Attributes as OA;
+use OpenApi\Attributes\Schema;
 
 class ProjectController extends Controller
 {
-    public function index(Request $request): JsonResponse
+    // ─── GET /v1/projects ────────────────────────────────────────────────────
+
+    #[GetIndexRequest(
+        tags: [PROJECT_TAG],
+        path: "/v1/projects",
+        operationId: "ProjectController@index",
+        summary: "List all projects. All authenticated users can access this endpoint.",
+        security: [Auth_JWT],
+        filters: [
+            new OA\Parameter(
+                in: "query",
+                name: "filter[status]",
+                description: "Filter by project status (PLANNING, ACTIVE, ON_HOLD, COMPLETED, CANCELLED)",
+                schema: new Schema(
+                    type: "string",
+                    enum: ["PLANNING", "ACTIVE", "ON_HOLD", "COMPLETED", "CANCELLED"]
+                )
+            ),
+            new OA\Parameter(
+                in: "query",
+                name: "filter[client_name]",
+                description: "Filter by client name (partial match)",
+                schema: new Schema(type: "string")
+            ),
+        ]
+    )]
+    #[Response200WithPagination(ref: "schemas/project_resource.yaml", description: "Project list")]
+    #[ResponseDefault()]
+    public function index(ProjectRequest $request): JsonResponse
     {
-        $query = Project::with(['activeWbdVersion', 'createdBy.role'])
-            ->orderBy('project_name');
-
-        if ($request->filled('search')) {
-            $query->where(function ($q) use ($request) {
-                $q->where('project_name', 'like', '%' . $request->search . '%')
-                    ->orWhere('project_code', 'like', '%' . $request->search . '%')
-                    ->orWhere('client_name', 'like', '%' . $request->search . '%');
-            });
-        }
-
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        $projects = $query->paginate($request->get('limit', 20));
+        $projects = ProjectResource::collection(
+            Project::projects($request->only(['search', 'filter', 'sort-by', 'sort-dir']))
+                ->paginate($request->get('per-page', 20))
+        );
 
         return response()->json([
             'success' => true,
             'message' => 'Projects fetched successfully',
-            'data' => $projects->map(fn ($p) => $this->formatProject($p)),
-            'meta' => [
-                'page' => $projects->currentPage(),
-                'limit' => $projects->perPage(),
-                'total' => $projects->total(),
+            'data'    => $projects,
+            'meta'    => [
+                'page'  => $projects->resource->currentPage(),
+                'limit' => $projects->resource->perPage(),
+                'total' => $projects->resource->total(),
             ],
         ]);
     }
 
-    public function show(Request $request, Project $project): JsonResponse
-    {
-        $project->load(['activeWbdVersion', 'createdBy.role']);
+    // ─── GET /v1/projects/{project} ──────────────────────────────────────────
 
+    #[OA\Get(
+        tags: [PROJECT_TAG],
+        path: "/v1/projects/{project}",
+        operationId: "ProjectController@show",
+        summary: "Get project detail. All authenticated users can access this endpoint.",
+        parameters: [
+            new OA\Parameter(
+                in: "path",
+                name: "project",
+                required: true,
+                schema: new Schema(type: "string", format: "uuid")
+            ),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Project detail", ref: "schemas/project_resource.yaml")]
+    #[ResponseDefault()]
+    public function show(ProjectRequest $request, Project $project): JsonResponse
+    {
         return response()->json([
             'success' => true,
             'message' => 'Project detail fetched successfully',
-            'data' => $this->formatProject($project, true),
+            'data'    => new ProjectResource($project),
         ]);
     }
 
-    public function store(Request $request): JsonResponse
-    {
-        // Project creation: PM or Admin Proyek can create projects
-        if (!$request->user()->isProjectManager() && !$request->user()->isAdminProyek() && !$request->user()->isAdministratorSistem()) {
-            abort(403, 'You do not have permission to create projects.');
-        }
+    // ─── POST /v1/projects ───────────────────────────────────────────────────
 
-        $validated = $request->validate([
-            'project_code' => ['required', 'string', 'max:100', 'unique:projects,project_code'],
-            'project_name' => ['required', 'string', 'min:3', 'max:200'],
-            'client_name' => ['required', 'string', 'min:2', 'max:200'],
-            'location' => ['required', 'string', 'min:2', 'max:200'],
-            'start_date' => ['required', 'date'],
-            'end_date' => ['required', 'date', 'gte:start_date'],
-            'status' => ['sometimes', 'string', Rule::in(['ACTIVE', 'COMPLETED', 'ON_HOLD', 'CANCELLED'])],
-            'description' => ['nullable', 'string'],
-        ]);
+    #[OA\Post(
+        tags: [PROJECT_TAG],
+        path: "/v1/projects",
+        operationId: "ProjectController@store",
+        summary: "Create a new project. Allowed roles: Project Manager, Admin Proyek, Administrator Sistem.",
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                ref: "schemas/new_project_request.yaml"
+            )
+        ),
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(response: "201", description: "Project created", ref: "schemas/project_resource.yaml")]
+    #[ResponseDefault()]
+    public function store(ProjectRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
 
         $project = Project::create([
             ...$validated,
-            'status' => $validated['status'] ?? 'ACTIVE',
+            'status'     => $validated['status'] ?? 'ACTIVE',
             'created_by' => $request->user()->id,
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'Project created successfully',
-            'data' => $this->formatProject($project->load(['activeWbdVersion', 'createdBy.role'])),
+            'data'    => new ProjectResource($project),
         ], 201);
     }
 
-    public function update(Request $request, Project $project): JsonResponse
+    // ─── PATCH /v1/projects/{project} ────────────────────────────────────────
+
+    #[OA\Patch(
+        tags: [PROJECT_TAG],
+        path: "/v1/projects/{project}",
+        operationId: "ProjectController@update",
+        summary: "Update project data. Allowed roles: Project Manager, Admin Proyek, Administrator Sistem.",
+        parameters: [
+            new OA\Parameter(
+                in: "path",
+                name: "project",
+                required: true,
+                schema: new Schema(type: "string", format: "uuid")
+            ),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                ref: "schemas/update_project_request.yaml"
+            )
+        ),
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Project updated", ref: "schemas/project_resource.yaml")]
+    #[ResponseDefault()]
+    public function update(ProjectRequest $request, Project $project): JsonResponse
     {
-        if (!$request->user()->isProjectManager() && !$request->user()->isAdminProyek() && !$request->user()->isAdministratorSistem()) {
-            abort(403, 'You do not have permission to update projects.');
-        }
-
-        $validated = $request->validate([
-            'project_name' => ['sometimes', 'string', 'min:3', 'max:200'],
-            'client_name' => ['sometimes', 'string', 'min:2', 'max:200'],
-            'location' => ['sometimes', 'string', 'min:2', 'max:200'],
-            'start_date' => ['sometimes', 'date'],
-            'end_date' => ['sometimes', 'date', 'gte:start_date'],
-            'status' => ['sometimes', 'string', Rule::in(['ACTIVE', 'COMPLETED', 'ON_HOLD', 'CANCELLED'])],
-            'description' => ['nullable', 'string'],
-        ]);
-
-        $project->update($validated);
+        $project->update($request->validated());
 
         return response()->json([
             'success' => true,
             'message' => 'Project updated successfully',
-            'data' => $this->formatProject($project->fresh(['activeWbdVersion', 'createdBy.role'])),
+            'data'    => new ProjectResource($project->fresh()),
         ]);
-    }
-
-    private function formatProject(Project $project, bool $detail = false): array
-    {
-        $data = [
-            'id' => $project->id,
-            'project_code' => $project->project_code,
-            'project_name' => $project->project_name,
-            'client_name' => $project->client_name,
-            'location' => $project->location,
-            'start_date' => $project->start_date?->toDateString(),
-            'end_date' => $project->end_date?->toDateString(),
-            'status' => $project->status,
-            'has_active_baseline' => $project->hasActiveBaseline(),
-            'active_wbd_version' => $project->activeWbdVersion ? [
-                'id' => $project->activeWbdVersion->id,
-                'version_number' => $project->activeWbdVersion->version_number,
-                'status' => $project->activeWbdVersion->status,
-            ] : null,
-        ];
-
-        if ($detail) {
-            $data['description'] = $project->description;
-            $data['created_by'] = $project->createdBy ? [
-                'id' => $project->createdBy->id,
-                'full_name' => $project->createdBy->full_name,
-            ] : null;
-            $data['created_at'] = $project->created_at;
-            $data['updated_at'] = $project->updated_at;
-        }
-
-        return $data;
     }
 }

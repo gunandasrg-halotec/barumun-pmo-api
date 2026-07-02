@@ -9,6 +9,11 @@ properties:
     format: email
   is_active:
     type: boolean
+  phone:
+    type: string 
+  last_login_at:
+    type: string
+    format: date-time
   role:
     type: object
     properties:
@@ -17,7 +22,16 @@ properties:
       name:
         type: string
         format: name
+      code:
+        type: string
+        enum:
+          [
+            ADMINISTRATOR_SISTEM,
+            PROJECT_MANAGER,
+            DIREKSI,
+            FINANCE,
+            ADMIN_PROYEK,
+            ]
   created_at:
     type: string
     format: date-time
-

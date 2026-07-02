@@ -1,0 +1,14 @@
+type: object
+properties:
+  wbd_node_id:
+    type: string
+    format: uuid
+  progress_date:
+    type: string
+    format: date
+  progress_volume:
+    type: number
+    min: 1
+  note:
+    type: string
+    nullable: true

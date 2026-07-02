@@ -1,0 +1,7 @@
+type: object
+allOf:
+  - $ref: base_progress.yaml
+required:
+  - wbd_node_id
+  - progress_date
+  - progress_volume

@@ -1,0 +1,47 @@
+# Version Control
+.git
+.gitignore
+.gitattributes
+
+# Laravel Environment & Secrets
+.env
+.env.*
+!.env.example
+*.key
+
+# Dependencies (Installed during Docker build layers)
+vendor/
+node_modules/
+
+# Frontend Build & Assets Cache
+public/hot
+public/storage
+mix-manifest.json
+vite.config.js.timestamp-*
+
+# Application Caches & Dynamic Logs
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/logs/*
+!storage/framework/cache/.gitignore
+!storage/framework/sessions/.gitignore
+!storage/framework/views/.gitignore
+!storage/logs/.gitignore
+
+# Testing & IDEs
+.phpunit.result.cache
+phpunit.xml
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Docker Configs (Not needed inside the app container)
+Dockerfile
+docker-compose.yml
+.dockerignore
+    

@@ -2,196 +2,218 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Core\Response2xx;
+use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\WbdNodeRequest;
+use App\Http\Resources\WbdNodeResource;
 use App\Models\WbdNode;
 use App\Models\WbdVersion;
 use App\Services\WbdService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use OpenApi\Attributes as OA;
+use OpenApi\Attributes\Schema;
 
 class WbdNodeController extends Controller
 {
     public function __construct(private WbdService $wbdService) {}
 
-    public function index(Request $request, WbdVersion $wbdVersion): JsonResponse
-    {
-        $nodes = $wbdVersion->nodes()->get();
+    // ─── GET /v1/wbd-versions/{wbdVersion}/nodes ─────────────────────────────
 
-        // Build tree structure
-        $tree = $this->buildTree($nodes);
+    #[OA\Get(
+        tags: [WBD_NODE_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/nodes",
+        operationId: "WbdNodeController@index",
+        summary: "Get all WBD nodes for a version (nested tree). All authenticated users.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "WBD node tree")]
+    #[ResponseDefault()]
+    public function index(WbdNodeRequest $request, WbdVersion $wbdVersion): JsonResponse
+    {
+        $nodes = $wbdVersion->nodes()->with(['children', 'predecessorDependencies.predecessor'])->get();
+        $tree  = $this->buildTree($nodes);
 
         return response()->json([
             'success' => true,
             'message' => 'WBD nodes fetched successfully',
-            'data' => $tree,
+            'data'    => $tree,
         ]);
     }
 
-    public function store(Request $request, WbdVersion $wbdVersion): JsonResponse
+    // ─── POST /v1/wbd-versions/{wbdVersion}/nodes ────────────────────────────
+
+    #[OA\Post(
+        tags: [WBD_NODE_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/nodes",
+        operationId: "WbdNodeController@store",
+        summary: "Create a WBD node in a DRAFT version. Allowed: PM, Admin Proyek.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(ref: "schemas/new_wbd_node_request.yaml")
+        ),
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(response: "201", description: "WBD node created")]
+    #[ResponseDefault()]
+    public function store(WbdNodeRequest $request, WbdVersion $wbdVersion): JsonResponse
     {
-        if (!$request->user()->canManageWbd()) {
-            abort(403, 'You do not have permission to manage WBD nodes.');
-        }
-
         if (!$wbdVersion->canBeEdited()) {
-            abort(403, 'This WBD version cannot be edited. Only DRAFT versions are editable.');
+            abort(422, 'Only DRAFT WBD versions can be edited.');
         }
 
-        $validated = $request->validate([
-            'parent_node_id' => ['nullable', 'uuid', 'exists:wbd_nodes,id'],
-            'node_type' => ['required', Rule::in(['GROUP', 'ITEM'])],
-            'code' => ['required', 'string', 'max:100'],
-            'name' => ['required', 'string', 'min:2', 'max:255'],
-            'description' => ['nullable', 'string'],
-            'unit' => ['nullable', 'string', 'max:50'],
-            'volume' => ['nullable', 'numeric', 'min:0'],
-            'rate' => ['nullable', 'numeric', 'min:0'],
-            'start_date' => ['nullable', 'date'],
-            'duration_days' => ['nullable', 'integer', 'min:1'],
-            'status' => ['sometimes', 'string'],
-            'sort_order' => ['sometimes', 'integer', 'min:0'],
-        ]);
-
-        // Validate ITEM requires unit, volume, rate
-        if ($validated['node_type'] === 'ITEM') {
-            $request->validate([
-                'unit' => ['required', 'string', 'max:50'],
-                'volume' => ['required', 'numeric', 'min:0'],
-                'rate' => ['required', 'numeric', 'min:0'],
-                'start_date' => ['required', 'date'],
-                'duration_days' => ['required', 'integer', 'min:1'],
-            ]);
-        }
+        $data = $request->validated();
 
         // Validate parent belongs to same version
-        if (!empty($validated['parent_node_id'])) {
-            $parent = WbdNode::find($validated['parent_node_id']);
+        if (!empty($data['parent_node_id'])) {
+            $parent = WbdNode::findOrFail($data['parent_node_id']);
             if ($parent->wbd_version_id !== $wbdVersion->id) {
                 abort(422, 'Parent node must belong to the same WBD version.');
             }
         }
 
         // Unique code within version
-        $codeExists = WbdNode::where('wbd_version_id', $wbdVersion->id)
-            ->where('code', $validated['code'])
-            ->exists();
-        if ($codeExists) {
+        if (WbdNode::where('wbd_version_id', $wbdVersion->id)->where('code', $data['code'])->exists()) {
             abort(422, 'Node code must be unique within this WBD version.');
         }
 
-        // Calculate end_date
-        $endDate = null;
-        if (!empty($validated['start_date']) && !empty($validated['duration_days'])) {
-            $endDate = date('Y-m-d', strtotime($validated['start_date'] . ' +' . ($validated['duration_days'] - 1) . ' days'));
+        // Calculate derived fields
+        $endDate     = null;
+        $plannedCost = 0;
+
+        if (!empty($data['start_date']) && !empty($data['duration_days'])) {
+            $endDate = \Carbon\Carbon::parse($data['start_date'])->addDays($data['duration_days'] - 1)->toDateString();
         }
 
-        // Calculate planned_cost
-        $plannedCost = 0;
-        if ($validated['node_type'] === 'ITEM') {
-            $plannedCost = ($validated['volume'] ?? 0) * ($validated['rate'] ?? 0);
+        if ($data['node_type'] === 'ITEM') {
+            $plannedCost = ($data['volume'] ?? 0) * ($data['rate'] ?? 0);
         }
 
         $node = WbdNode::create([
             'wbd_version_id' => $wbdVersion->id,
-            'parent_node_id' => $validated['parent_node_id'] ?? null,
-            'node_type' => $validated['node_type'],
-            'code' => $validated['code'],
-            'name' => $validated['name'],
-            'description' => $validated['description'] ?? null,
-            'unit' => $validated['unit'] ?? null,
-            'volume' => $validated['volume'] ?? null,
-            'rate' => $validated['rate'] ?? null,
-            'planned_cost' => $plannedCost,
-            'start_date' => $validated['start_date'] ?? null,
-            'duration_days' => $validated['duration_days'] ?? null,
-            'end_date' => $endDate,
-            'status' => $validated['status'] ?? 'ACTIVE',
-            'sort_order' => $validated['sort_order'] ?? 0,
+            'parent_node_id' => $data['parent_node_id'] ?? null,
+            'node_type'      => $data['node_type'],
+            'code'           => $data['code'],
+            'name'           => $data['name'],
+            'description'    => $data['description'] ?? null,
+            'unit'           => $data['unit'] ?? null,
+            'volume'         => $data['volume'] ?? null,
+            'rate'           => $data['rate'] ?? null,
+            'planned_cost'   => $plannedCost,
+            'start_date'     => $data['start_date'] ?? null,
+            'duration_days'  => $data['duration_days'] ?? null,
+            'end_date'       => $endDate,
+            'status'         => $data['status'] ?? 'ACTIVE',
+            'sort_order'     => $data['sort_order'] ?? 0,
         ]);
 
-        // Recalculate the version totals
         $this->wbdService->recalculate($wbdVersion);
 
         return response()->json([
             'success' => true,
             'message' => 'WBD node created successfully',
-            'data' => $this->formatNode($node),
+            'data'    => new WbdNodeResource($node->fresh()),
         ], 201);
     }
 
-    public function update(Request $request, WbdNode $wbdNode): JsonResponse
+    // ─── PATCH /v1/wbd-nodes/{wbdNode} ───────────────────────────────────────
+
+    #[OA\Patch(
+        tags: [WBD_NODE_TAG],
+        path: "/v1/wbd-nodes/{wbdNode}",
+        operationId: "WbdNodeController@update",
+        summary: "Update a WBD node in a DRAFT version. Allowed: PM, Admin Proyek.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdNode", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(ref: "schemas/update_wbd_node_request.yaml")
+        ),
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "WBD node updated")]
+    #[ResponseDefault()]
+    public function update(WbdNodeRequest $request, WbdNode $wbdNode): JsonResponse
     {
-        if (!$request->user()->canManageWbd()) {
-            abort(403, 'You do not have permission to manage WBD nodes.');
-        }
-
         $version = $wbdNode->wbdVersion;
+
         if (!$version->canBeEdited()) {
-            abort(403, 'This WBD version cannot be edited. Only DRAFT versions are editable.');
+            abort(422, 'Only DRAFT WBD versions can be edited.');
         }
 
-        $validated = $request->validate([
-            'name' => ['sometimes', 'string', 'min:2', 'max:255'],
-            'description' => ['nullable', 'string'],
-            'unit' => ['sometimes', 'nullable', 'string', 'max:50'],
-            'volume' => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'rate' => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'start_date' => ['sometimes', 'nullable', 'date'],
-            'duration_days' => ['sometimes', 'nullable', 'integer', 'min:1'],
-            'status' => ['sometimes', 'string'],
-            'sort_order' => ['sometimes', 'integer', 'min:0'],
-        ]);
+        $data = $request->validated();
 
-        // Recalculate end_date if dates changed
-        if (isset($validated['start_date']) || isset($validated['duration_days'])) {
-            $startDate = $validated['start_date'] ?? $wbdNode->start_date?->toDateString();
-            $duration = $validated['duration_days'] ?? $wbdNode->duration_days;
+        // Recalculate end_date if schedule changed
+        if (isset($data['start_date']) || isset($data['duration_days'])) {
+            $startDate = $data['start_date']   ?? $wbdNode->start_date?->toDateString();
+            $duration  = $data['duration_days'] ?? $wbdNode->duration_days;
             if ($startDate && $duration) {
-                $validated['end_date'] = date('Y-m-d', strtotime($startDate . ' +' . ($duration - 1) . ' days'));
+                $data['end_date'] = \Carbon\Carbon::parse($startDate)->addDays($duration - 1)->toDateString();
             }
         }
 
         // Recalculate planned_cost if volume or rate changed
-        if (isset($validated['volume']) || isset($validated['rate'])) {
-            $volume = $validated['volume'] ?? $wbdNode->volume;
-            $rate = $validated['rate'] ?? $wbdNode->rate;
-            $validated['planned_cost'] = ($volume ?? 0) * ($rate ?? 0);
+        if (isset($data['volume']) || isset($data['rate'])) {
+            $volume = $data['volume'] ?? $wbdNode->volume;
+            $rate   = $data['rate']   ?? $wbdNode->rate;
+            $data['planned_cost'] = ($volume ?? 0) * ($rate ?? 0);
         }
 
-        $wbdNode->update($validated);
+        $scheduleChanged = isset($data['start_date']) || isset($data['duration_days']);
 
+        $wbdNode->update($data);
         $this->wbdService->recalculate($version);
+
+        // If dates changed, cascade to all dependency successors
+        if ($scheduleChanged) {
+            app(WbdNodeDependencyController::class)->cascadeFrom($wbdNode);
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'WBD node updated successfully',
-            'data' => $this->formatNode($wbdNode->fresh()),
+            'data'    => new WbdNodeResource($wbdNode->fresh()),
         ]);
     }
 
-    public function destroy(Request $request, WbdNode $wbdNode): JsonResponse
+    // ─── DELETE /v1/wbd-nodes/{wbdNode} ──────────────────────────────────────
+
+    #[OA\Delete(
+        tags: [WBD_NODE_TAG],
+        path: "/v1/wbd-nodes/{wbdNode}",
+        operationId: "WbdNodeController@destroy",
+        summary: "Delete a WBD node from a DRAFT version. Allowed: PM, Admin Proyek.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdNode", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "WBD node deleted")]
+    #[ResponseDefault()]
+    public function destroy(WbdNodeRequest $request, WbdNode $wbdNode): JsonResponse
     {
-        if (!$request->user()->canManageWbd()) {
-            abort(403, 'You do not have permission to delete WBD nodes.');
-        }
-
         $version = $wbdNode->wbdVersion;
+
         if (!$version->canBeEdited()) {
-            abort(403, 'This WBD version cannot be edited. Only DRAFT versions are editable.');
+            abort(422, 'Only DRAFT WBD versions can be edited.');
         }
 
-        // Cannot delete node if it has progress entries
         if ($wbdNode->progressEntries()->exists()) {
-            abort(422, 'Cannot delete WBD node that has associated progress entries.');
+            abort(422, 'Node ini memiliki data realisasi progress dan tidak dapat dihapus.');
         }
 
-        // Cannot delete group that has children
-        if ($wbdNode->children()->exists()) {
-            abort(422, 'Cannot delete WBD node that has children. Delete children first.');
-        }
-
-        $wbdNode->delete();
+        $this->deleteNodeRecursive($wbdNode);
         $this->wbdService->recalculate($version);
 
         return response()->json([
@@ -200,40 +222,34 @@ class WbdNodeController extends Controller
         ]);
     }
 
-    private function buildTree($nodes, $parentId = null): array
+    private function deleteNodeRecursive(WbdNode $node): void
     {
-        $tree = [];
-        foreach ($nodes as $node) {
-            if ($node->parent_node_id === $parentId) {
-                $item = $this->formatNode($node);
-                $item['children'] = $this->buildTree($nodes, $node->id);
-                $tree[] = $item;
-            }
+        foreach ($node->children as $child) {
+            $this->deleteNodeRecursive($child);
         }
-        return $tree;
+        $node->delete();
     }
 
-    private function formatNode(WbdNode $node): array
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private function buildTree($nodes, ?string $parentId = null): array
     {
-        return [
-            'id' => $node->id,
-            'wbd_version_id' => $node->wbd_version_id,
-            'parent_node_id' => $node->parent_node_id,
-            'node_type' => $node->node_type,
-            'code' => $node->code,
-            'name' => $node->name,
-            'description' => $node->description,
-            'unit' => $node->unit,
-            'volume' => $node->volume,
-            'rate' => $node->rate,
-            'planned_cost' => $node->planned_cost,
-            'component_percent' => $node->component_percent,
-            'total_percent' => $node->total_percent,
-            'start_date' => $node->start_date?->toDateString(),
-            'duration_days' => $node->duration_days,
-            'end_date' => $node->end_date?->toDateString(),
-            'status' => $node->status,
-            'sort_order' => $node->sort_order,
-        ];
+        return $nodes
+            ->filter(fn ($n) => $n->parent_node_id === $parentId)
+            ->map(function ($node) use ($nodes) {
+                $resource           = new WbdNodeResource($node);
+                $arr                = $resource->toArray(request());
+                $arr['children']    = $this->buildTree($nodes, $node->id);
+                $arr['predecessors'] = $node->predecessorDependencies->map(fn ($d) => [
+                    'id'              => $d->id,
+                    'predecessor_id'  => $d->predecessor_node_id,
+                    'code'            => $d->predecessor->code ?? '?',
+                    'name'            => $d->predecessor->name ?? '?',
+                    'dependency_type' => $d->dependency_type,
+                ])->values()->toArray();
+                return $arr;
+            })
+            ->values()
+            ->toArray();
     }
 }

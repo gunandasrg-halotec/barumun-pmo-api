@@ -4,11 +4,14 @@ namespace App\Services;
 
 use App\Enums\ProgressStatus;
 use App\Enums\RoleName;
+use App\Models\ActualCostTransaction;
+use App\Models\Notification;
 use App\Models\ProgressEntry;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\WbdNode;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class ProgressService
 {
@@ -43,6 +46,64 @@ class ProgressService
             throw new \RuntimeException('Progress volume must be greater than 0.');
         }
 
+        // Guard: node sudah ditandai selesai (remaining_volume = 0)
+        $isCompleted = ProgressEntry::where('wbd_node_id', $node->id)
+            ->whereIn('status', [
+                ProgressStatus::APPROVED->value,
+                ProgressStatus::AUTO_APPROVED->value,
+                ProgressStatus::PENDING_PM_APPROVAL->value,
+            ])
+            ->whereNotNull('remaining_volume')
+            ->where('remaining_volume', 0)
+            ->exists();
+
+        if ($isCompleted) {
+            throw new \RuntimeException(
+                'Pekerjaan ini sudah ditandai selesai. Tidak dapat menambahkan progress baru.'
+            );
+        }
+
+        // Guard: progress_date tidak boleh lebih awal dari entry terbaru (berdasarkan progress_date)
+        $latestEntry = ProgressEntry::where('wbd_node_id', $node->id)
+            ->whereIn('status', [
+                ProgressStatus::APPROVED->value,
+                ProgressStatus::AUTO_APPROVED->value,
+                ProgressStatus::PENDING_PM_APPROVAL->value,
+            ])
+            ->orderByDesc('progress_date')
+            ->first();
+
+        if ($latestEntry && isset($data['progress_date'])) {
+            $newDate    = \Carbon\Carbon::parse($data['progress_date']);
+            $latestDate = \Carbon\Carbon::parse($latestEntry->progress_date);
+            if ($newDate->lt($latestDate)) {
+                throw new \RuntimeException(
+                    'Tanggal progress tidak boleh lebih awal dari entry terakhir (' .
+                    $latestDate->format('d M Y') . ').'
+                );
+            }
+        }
+
+        // Guard: total volume (existing + new) must not exceed planned volume
+        if ($node->volume !== null && $node->volume > 0) {
+            $existingVolume = ProgressEntry::where('wbd_node_id', $node->id)
+                ->whereIn('status', [
+                    ProgressStatus::APPROVED->value,
+                    ProgressStatus::AUTO_APPROVED->value,
+                    ProgressStatus::PENDING_PM_APPROVAL->value,
+                ])
+                ->sum('progress_volume');
+
+            $remaining = $node->volume - $existingVolume;
+
+            if ($data['progress_volume'] > $remaining) {
+                throw new \RuntimeException(
+                    "Volume realisasi melebihi volume rencana. " .
+                    "Sisa volume yang dapat diinput: {$remaining} {$node->unit}."
+                );
+            }
+        }
+
         return DB::transaction(function () use ($project, $node, $data, $enteredBy) {
             $status = $enteredBy->isProjectManager()
                 ? ProgressStatus::AUTO_APPROVED->value
@@ -65,13 +126,95 @@ class ProgressService
                 ]);
             }
 
+            // Create cost transaction if actual_cost is provided
+            $actualCost = $data['actual_cost'] ?? null;
+            if ($actualCost !== null && $actualCost > 0) {
+                ActualCostTransaction::create([
+                    'project_id'        => $project->id,
+                    'progress_entry_id' => $progress->id,
+                    'amount'            => $actualCost,
+                    'transaction_date'  => $data['progress_date'],
+                    'description'       => $data['note'] ?? null,
+                    'entered_by'        => $enteredBy->id,
+                    'status'            => 'APPROVED',
+                ]);
+            }
+
+            // Store attachment if provided
+            if (!empty($data['attachment'])) {
+                $file = $data['attachment'];
+                $path = $file->store('progress-attachments/' . $project->id, 'local');
+                $progress->update(['attachment_path' => $path]);
+            }
+
+            // Handle remaining_volume: pakai nilai dari user, atau hitung otomatis
+            $remainingVolume = isset($data['remaining_volume']) && $data['remaining_volume'] !== ''
+                ? (float) $data['remaining_volume']
+                : ($node->volume !== null
+                    ? max(0, (float) $node->volume - (float) $data['progress_volume'])
+                    : null);
+
+            $progress->update(['remaining_volume' => $remainingVolume]);
+
+            // Handle remaining_cost: pakai nilai dari user, atau hitung otomatis (remaining_volume × rate)
+            $remainingCost = isset($data['remaining_cost']) && $data['remaining_cost'] !== ''
+                ? (float) $data['remaining_cost']
+                : ($remainingVolume !== null && $node->rate !== null
+                    ? round($remainingVolume * (float) $node->rate, 2)
+                    : null);
+
+            $progress->update(['remaining_cost' => $remainingCost]);
+
+            // Kirim notifikasi ke Direktur jika realisasi + sisa > rencana
+            if (
+                $remainingVolume !== null &&
+                $node->volume !== null &&
+                ((float) $data['progress_volume'] + $remainingVolume) > (float) $node->volume
+            ) {
+                $directors = User::whereHas('role', fn ($q) =>
+                    $q->where('role_name', RoleName::DIREKSI->value)
+                )->get();
+
+                foreach ($directors as $director) {
+                    Notification::create([
+                        'user_id'      => $director->id,
+                        'triggered_by' => $enteredBy->id,
+                        'type'         => 'OVER_BUDGET_RISK',
+                        'title'        => 'Potensi Over Budget: ' . $node->name,
+                        'message'      => sprintf(
+                            '%s mencatat realisasi %s %s dengan estimasi sisa %s %s, ' .
+                            'melebihi rencana %s %s untuk item "%s" pada proyek "%s".',
+                            $enteredBy->full_name,
+                            number_format((float) $data['progress_volume'], 2, '.', ','),
+                            $node->unit,
+                            number_format($remainingVolume, 2, '.', ','),
+                            $node->unit,
+                            number_format((float) $node->volume, 2, '.', ','),
+                            $node->unit,
+                            $node->name,
+                            $project->name
+                        ),
+                        'data' => [
+                            'project_id'        => $project->id,
+                            'project_name'      => $project->name,
+                            'wbd_node_id'       => $node->id,
+                            'wbd_node_name'     => $node->name,
+                            'progress_entry_id' => $progress->id,
+                            'volume_plan'       => (float) $node->volume,
+                            'volume_actual'     => (float) $data['progress_volume'],
+                            'volume_remaining'  => $remainingVolume,
+                        ],
+                    ]);
+                }
+            }
+
             $this->auditLog->logCreate('progress_entry', $progress->id, [
                 'status' => $status,
                 'entered_by_role' => $enteredBy->role->role_name,
             ]);
 
             return $progress->fresh([
-                'project', 'wbdNode', 'enteredByUser.role', 'approvedByUser',
+                'project', 'wbdNode', 'enteredByUser.role', 'approvedByUser', 'actualCostTransactions',
             ]);
         });
     }

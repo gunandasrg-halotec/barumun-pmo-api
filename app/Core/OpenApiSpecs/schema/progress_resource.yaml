@@ -1,0 +1,75 @@
+    type: object
+    properties:
+      id:
+        type: string
+        format: uuid
+        example: "019ec7a0-fa2d-71e2-96f8-adaaeba1614e"
+      project_id:
+        type: string
+        format: uuid
+        example: "019ec7a0-fa2d-71e2-96f8-cbbaeba1614f"
+      wbd_node:
+        $ref: wbd_node_short.yaml
+      progress_date:
+        type: string
+        format: date
+        example: "2026-06-15"
+      progress_volume:
+        type: number
+        format: float
+        nullable: true
+        example: 150.5
+      note:
+        type: string
+        nullable: true
+        example: "Progress completed for Sector 3"
+      status:
+        type: string
+        enum: [PENDING, APPROVED, REJECTED]
+        example: "PENDING"
+      is_official:
+        type: boolean
+        example: true
+      entered_by:
+        $ref: creator.yaml
+      approved_by:
+        allOf:
+          - $ref: creator.yaml
+        nullable: true
+        description: "User who approved the progress, null if not yet approved"
+      approved_at:
+        type: string
+        format: date-time
+        nullable: true
+        example: "2026-06-15T08:30:00.000000Z"
+      rejected_by:
+        allOf:
+          - $ref: creator.yaml
+        nullable: true
+        description: "User who rejected the progress, null if not rejected"
+      rejected_at:
+        type: string
+        format: date-time
+        nullable: true
+        example: null
+      rejection_reason:
+        type: string
+        nullable: true
+        example: null
+      actual_costs:
+        type: array
+        items:
+          $ref: actual_cost_short.yaml
+      created_at:
+        type: string
+        format: date-time
+        example: "2026-06-15T06:23:30.000000Z"
+      updated_at:
+        type: string
+        format: date-time
+        example: "2026-06-15T06:23:30.000000Z"
+
+  
+
+  
+  

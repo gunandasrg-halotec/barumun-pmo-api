@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Core\Response2xx;
+use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
 use App\Models\ActualCostTransaction;
 use App\Models\ProgressEntry;
@@ -10,12 +12,34 @@ use App\Models\WbdNode;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use OpenApi\Attributes as OA;
+use OpenApi\Attributes\Schema;
 
+/**
+ * Phase 8 — Dashboard and Analytics.
+ *
+ * SRS rule: ALL analytics endpoints ONLY use officially approved data:
+ *   - Progress:    status IN ('APPROVED', 'AUTO_APPROVED')
+ *   - Actual Cost: status = 'APPROVED'
+ *   - Baseline:    active WBD version (is_active = true, FINAL_APPROVED)
+ */
 class AnalyticsController extends Controller
 {
-    /**
-     * Dashboard aggregation — only uses approved data.
-     */
+    // ─── GET /v1/projects/{project}/dashboard ────────────────────────────────
+
+    #[OA\Get(
+        tags: [ANALYTICS_TAG],
+        path: "/v1/projects/{project}/dashboard",
+        operationId: "AnalyticsController@dashboard",
+        summary: "Project dashboard KPI summary. All data from approved transactions and active baseline only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "project", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Dashboard KPI data")]
+    #[ResponseDefault()]
     public function dashboard(Request $request, Project $project): JsonResponse
     {
         $project->load('activeWbdVersion');
@@ -24,188 +48,346 @@ class AnalyticsController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Dashboard data fetched',
-                'data' => [
+                'data'    => [
                     'has_baseline' => false,
-                    'message' => 'No active baseline available for this project.',
+                    'message'      => 'No active baseline available. Please create and approve a WBD version.',
                 ],
             ]);
         }
 
         $activeVersionId = $project->active_wbd_version_id;
 
-        // Total baseline cost from active WBD version root nodes
-        $totalBaselineCost = WbdNode::where('wbd_version_id', $activeVersionId)
+        // Baseline cost — sum of root-level planned_cost from active WBD
+        $totalBaselineCost = (float) WbdNode::where('wbd_version_id', $activeVersionId)
             ->whereNull('parent_node_id')
             ->sum('planned_cost');
 
-        // Total approved actual cost
-        $totalApprovedCost = ActualCostTransaction::where('project_id', $project->id)
+        // Approved actual cost
+        $totalApprovedCost = (float) ActualCostTransaction::where('project_id', $project->id)
             ->where('status', 'APPROVED')
             ->sum('amount');
 
-        // Total official progress entries count
-        $totalOfficialProgress = ProgressEntry::where('project_id', $project->id)
+        // Official progress — approved entries only
+        $officialProgressCount = ProgressEntry::where('project_id', $project->id)
             ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
             ->count();
 
         // Pending items
-        $pendingProgress = ProgressEntry::where('project_id', $project->id)
+        $pendingProgressCount = ProgressEntry::where('project_id', $project->id)
             ->where('status', 'PENDING_PM_APPROVAL')
             ->count();
 
-        $pendingCost = ActualCostTransaction::where('project_id', $project->id)
+        $pendingCostCount = ActualCostTransaction::where('project_id', $project->id)
             ->where('status', 'REVIEW')
             ->count();
 
-        // Cost deviation
+        // ── Realisasi totals ─────────────────────────────────────────────────────
+        $approvedVolume = (float) ProgressEntry::where('project_id', $project->id)
+            ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
+            ->sum('progress_volume');
+
+        // ── Planned progress % from baseline schedule (volume & cost) ─────────
+        // Distribute each ITEM node's volume/cost linearly over start_date→end_date,
+        // then cumulate up to today to get "how much should have been done by now".
+        $today = \Carbon\Carbon::today();
+        $todayPeriod = $today->format('Y-m');
+
+        $itemNodes = WbdNode::where('wbd_version_id', $activeVersionId)
+            ->where('node_type', 'ITEM')
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date')
+            ->get();
+
+        $totalPlannedVolume    = 0.0;
+        $totalPlannedCost      = 0.0;
+        $scheduledVolToDate    = 0.0;
+        $scheduledCostToDate   = 0.0;
+
+        foreach ($itemNodes as $node) {
+            $start        = \Carbon\Carbon::parse($node->start_date)->startOfMonth();
+            $end          = \Carbon\Carbon::parse($node->end_date)->startOfMonth();
+            $months       = $start->diffInMonths($end) + 1;
+            $volPerMonth  = $months > 0 ? ((float) $node->volume / $months) : 0;
+            $costPerMonth = $months > 0 ? ((float) $node->planned_cost / $months) : 0;
+
+            $totalPlannedVolume += (float) $node->volume;
+            $totalPlannedCost   += (float) $node->planned_cost;
+
+            $cur = $start->copy();
+            for ($i = 0; $i < $months; $i++) {
+                if ($cur->format('Y-m') <= $todayPeriod) {
+                    $scheduledVolToDate  += $volPerMonth;
+                    $scheduledCostToDate += $costPerMonth;
+                }
+                $cur->addMonth();
+            }
+        }
+
+        // For nodes without schedule dates, add their full volume/cost to total
+        // but not to scheduled (they have no timeline basis).
+        $totalPlannedVolume += (float) WbdNode::where('wbd_version_id', $activeVersionId)
+            ->where('node_type', 'ITEM')
+            ->where(fn ($q) => $q->whereNull('start_date')->orWhereNull('end_date'))
+            ->sum('volume');
+        $totalPlannedCost += (float) WbdNode::where('wbd_version_id', $activeVersionId)
+            ->where('node_type', 'ITEM')
+            ->where(fn ($q) => $q->whereNull('start_date')->orWhereNull('end_date'))
+            ->sum('planned_cost');
+
+        // Planned % = scheduled-to-date / total planned
+        $plannedProgressPercent = $totalPlannedVolume > 0
+            ? min(100, round(($scheduledVolToDate / $totalPlannedVolume) * 100, 2))
+            : 0;
+
+        $plannedCostPercent = $totalPlannedCost > 0
+            ? min(100, round(($scheduledCostToDate / $totalPlannedCost) * 100, 2))
+            : 0;
+
+        // ── Actual progress % (completion estimate) ───────────────────────────
+        // actual volume: realisasi / (realisasi + sisa terbaru per node)
+        $latestRemainingByNode = DB::table('progress_entries as pe')
+            ->join(DB::raw('(
+                SELECT wbd_node_id, MAX(progress_date) as max_date
+                FROM progress_entries
+                WHERE project_id = \'' . $project->id . '\'
+                AND status IN (\'APPROVED\', \'AUTO_APPROVED\')
+                GROUP BY wbd_node_id
+            ) as latest'), function ($join) {
+                $join->on('pe.wbd_node_id', '=', 'latest.wbd_node_id')
+                     ->on('pe.progress_date', '=', 'latest.max_date');
+            })
+            ->where('pe.project_id', $project->id)
+            ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
+            ->whereNotNull('pe.remaining_volume')
+            ->select('pe.wbd_node_id', 'pe.remaining_volume')
+            ->get();
+
+        $totalRemainingVolume  = $latestRemainingByNode->sum('remaining_volume');
+        $volDenominator        = $approvedVolume + $totalRemainingVolume;
+        $actualProgressPercent = $volDenominator > 0
+            ? min(100, round(($approvedVolume / $volDenominator) * 100, 2))
+            : 0;
+
+        // actual cost: biaya_realisasi / (biaya_realisasi + sisa_biaya terbaru per node)
+        $latestRemainingCostByNode = DB::table('progress_entries as pe')
+            ->join(DB::raw('(
+                SELECT wbd_node_id, MAX(progress_date) as max_date
+                FROM progress_entries
+                WHERE project_id = \'' . $project->id . '\'
+                AND status IN (\'APPROVED\', \'AUTO_APPROVED\')
+                GROUP BY wbd_node_id
+            ) as latest'), function ($join) {
+                $join->on('pe.wbd_node_id', '=', 'latest.wbd_node_id')
+                     ->on('pe.progress_date', '=', 'latest.max_date');
+            })
+            ->where('pe.project_id', $project->id)
+            ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
+            ->whereNotNull('pe.remaining_cost')
+            ->select('pe.wbd_node_id', 'pe.remaining_cost')
+            ->get();
+
+        $totalRemainingCost  = $latestRemainingCostByNode->sum('remaining_cost');
+        $costDenominator     = $totalApprovedCost + $totalRemainingCost;
+        $actualCostPercent   = $costDenominator > 0
+            ? min(100, round(($totalApprovedCost / $costDenominator) * 100, 2))
+            : 0;
+
+        // Achievement rate (legacy): realisasi / total rencana
+        $overallProgressPercent = $totalPlannedVolume > 0
+            ? min(100, round(($approvedVolume / $totalPlannedVolume) * 100, 2))
+            : 0;
+
         $costDeviation = $totalApprovedCost - $totalBaselineCost;
 
         return response()->json([
             'success' => true,
             'message' => 'Dashboard data fetched successfully',
-            'data' => [
-                'has_baseline' => true,
-                'active_baseline_version' => $project->activeWbdVersion->version_number,
-                'total_baseline_cost' => (float) $totalBaselineCost,
-                'total_actual_cost_approved' => (float) $totalApprovedCost,
-                'cost_deviation' => (float) $costDeviation,
-                'cost_deviation_percent' => $totalBaselineCost > 0
+            'data'    => [
+                'has_baseline'                  => true,
+                'active_baseline_version'       => $project->activeWbdVersion->version_number,
+                'total_baseline_cost'           => $totalBaselineCost,
+                'total_actual_cost_approved'    => $totalApprovedCost,
+                'cost_deviation'                => $costDeviation,
+                'cost_deviation_percent'        => $totalBaselineCost > 0
                     ? round(($costDeviation / $totalBaselineCost) * 100, 2)
                     : 0,
-                'total_official_progress_entries' => $totalOfficialProgress,
-                'pending_progress_approval' => $pendingProgress,
-                'pending_cost_review' => $pendingCost,
+                'overall_progress_percent'      => $overallProgressPercent,
+                'planned_progress_percent'      => $plannedProgressPercent,
+                'actual_progress_percent'       => $actualProgressPercent,
+                'planned_cost_percent'          => $plannedCostPercent,
+                'actual_cost_percent'           => $actualCostPercent,
+                'total_official_progress_count' => $officialProgressCount,
+                'pending_progress_approval'     => $pendingProgressCount,
+                'pending_cost_review'           => $pendingCostCount,
             ],
         ]);
     }
 
-    /**
-     * Gantt data — read-only from active baseline WBD nodes.
-     */
-    public function gantt(Request $request, Project $project): JsonResponse
-    {
-        $project->load('activeWbdVersion');
+    // ─── GET /v1/projects/{project}/s-curve ──────────────────────────────────
 
-        if (!$project->hasActiveBaseline()) {
-            return response()->json([
-                'success' => true,
-                'message' => 'Gantt data fetched',
-                'data' => [],
-            ]);
-        }
-
-        $nodes = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
-            ->orderBy('sort_order')
-            ->get();
-
-        // For each ITEM node, get approved progress total volume
-        $progressByNode = ProgressEntry::where('project_id', $project->id)
-            ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
-            ->selectRaw('wbd_node_id, SUM(progress_volume) as total_volume')
-            ->groupBy('wbd_node_id')
-            ->pluck('total_volume', 'wbd_node_id');
-
-        $ganttData = $nodes->map(function ($node) use ($progressByNode) {
-            $actualVolume = $progressByNode[$node->id] ?? 0;
-            $progressPercent = ($node->volume && $node->volume > 0)
-                ? min(100, round(($actualVolume / $node->volume) * 100, 2))
-                : 0;
-
-            return [
-                'id' => $node->id,
-                'parent_node_id' => $node->parent_node_id,
-                'node_type' => $node->node_type,
-                'code' => $node->code,
-                'name' => $node->name,
-                'start_date' => $node->start_date?->toDateString(),
-                'end_date' => $node->end_date?->toDateString(),
-                'duration_days' => $node->duration_days,
-                'planned_cost' => $node->planned_cost,
-                'volume' => $node->volume,
-                'unit' => $node->unit,
-                'status' => $node->status,
-                'sort_order' => $node->sort_order,
-                'actual_volume' => (float) $actualVolume,
-                'progress_percent' => $progressPercent,
-            ];
-        });
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Gantt data fetched successfully',
-            'data' => $ganttData,
-        ]);
-    }
-
-    /**
-     * S-Curve — cumulative plan vs actual by period.
-     * Only uses approved progress and approved cost.
-     */
+    #[OA\Get(
+        tags: [ANALYTICS_TAG],
+        path: "/v1/projects/{project}/s-curve",
+        operationId: "AnalyticsController@sCurve",
+        summary: "S-Curve: monthly cumulative approved progress volume and approved cost. Approved data only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "project", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "S-Curve series data")]
+    #[ResponseDefault()]
     public function sCurve(Request $request, Project $project): JsonResponse
     {
         $project->load('activeWbdVersion');
 
-        if (!$project->hasActiveBaseline()) {
-            return response()->json([
-                'success' => true,
-                'message' => 'S-Curve data fetched',
-                'data' => ['plan' => [], 'actual' => []],
-            ]);
-        }
+        // ── Actual series — only from active WBD version nodes ───────────────
+        $activeVersionId = $project->active_wbd_version_id;
 
-        // Get official progress by date (monthly aggregation)
-        $actualProgress = ProgressEntry::where('project_id', $project->id)
+        $progressByMonth = ProgressEntry::where('project_id', $project->id)
             ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
+            ->when($activeVersionId, fn ($q) => $q->whereHas('wbdNode', fn ($nq) => $nq->where('wbd_version_id', $activeVersionId)))
             ->selectRaw("DATE_FORMAT(progress_date, '%Y-%m') as period, SUM(progress_volume) as volume")
             ->groupBy('period')
             ->orderBy('period')
-            ->get();
+            ->get()
+            ->keyBy('period');
 
-        $actualCost = ActualCostTransaction::where('project_id', $project->id)
+        $costByMonth = ActualCostTransaction::where('project_id', $project->id)
             ->where('status', 'APPROVED')
+            ->when($activeVersionId, fn ($q) => $q->whereHas('progressEntry.wbdNode', fn ($nq) => $nq->where('wbd_version_id', $activeVersionId)))
             ->selectRaw("DATE_FORMAT(transaction_date, '%Y-%m') as period, SUM(amount) as amount")
             ->groupBy('period')
             ->orderBy('period')
-            ->get();
+            ->get()
+            ->keyBy('period');
 
-        // Build cumulative series
-        $cumulativeVolume = 0;
-        $cumulativeCost = 0;
+        // ── Planned series from WBD baseline ──────────────────────────────────
+        $planVolumeByMonth = [];
+        $planCostByMonth   = [];
+        $totalPlannedVolume = 0.0;
 
-        $actualSeries = [];
-        foreach ($actualProgress as $row) {
-            $cumulativeVolume += $row->volume;
-            $actualSeries[$row->period] = [
-                'period' => $row->period,
-                'cumulative_volume' => $cumulativeVolume,
+        if ($project->hasActiveBaseline()) {
+            $itemNodes = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
+                ->where('node_type', 'ITEM')
+                ->whereNotNull('start_date')
+                ->whereNotNull('end_date')
+                ->get();
+
+            foreach ($itemNodes as $node) {
+                $start        = \Carbon\Carbon::parse($node->start_date)->startOfMonth();
+                $end          = \Carbon\Carbon::parse($node->end_date)->startOfMonth();
+                $months       = $start->diffInMonths($end) + 1;
+                $volPerMonth  = $months > 0 ? ((float) $node->volume / $months) : 0;
+                $costPerMonth = $months > 0 ? ((float) $node->planned_cost / $months) : 0;
+                $totalPlannedVolume += (float) $node->volume;
+
+                $cur = $start->copy();
+                for ($i = 0; $i < $months; $i++) {
+                    $p = $cur->format('Y-m');
+                    $planVolumeByMonth[$p] = ($planVolumeByMonth[$p] ?? 0) + $volPerMonth;
+                    $planCostByMonth[$p]   = ($planCostByMonth[$p] ?? 0) + $costPerMonth;
+                    $cur->addMonth();
+                }
+            }
+            ksort($planVolumeByMonth);
+            ksort($planCostByMonth);
+        }
+
+        // ── Union of all periods ──────────────────────────────────────────────
+        $allPeriods = collect(array_merge(
+            $progressByMonth->keys()->toArray(),
+            $costByMonth->keys()->toArray(),
+            array_keys($planVolumeByMonth)
+        ))->unique()->sort()->values();
+
+        $cumActualVol  = 0.0;
+        $cumActualCost = 0.0;
+        $cumPlanVol    = 0.0;
+        $cumPlanCost   = 0.0;
+        $volumeCurve   = [];
+        $costCurve     = [];
+
+        foreach ($allPeriods as $period) {
+            $cumActualVol  += (float) ($progressByMonth[$period]->volume ?? 0);
+            $cumActualCost += (float) ($costByMonth[$period]->amount ?? 0);
+            $cumPlanVol    += (float) ($planVolumeByMonth[$period] ?? 0);
+            $cumPlanCost   += (float) ($planCostByMonth[$period] ?? 0);
+
+            $actualVolPct = $totalPlannedVolume > 0
+                ? round(($cumActualVol / $totalPlannedVolume) * 100, 2)
+                : 0;
+            $planVolPct = $totalPlannedVolume > 0
+                ? round(($cumPlanVol / $totalPlannedVolume) * 100, 2)
+                : 0;
+
+            $volumeCurve[] = [
+                'period'            => $period,
+                'plan_cumulative'   => $planVolPct,
+                'actual_cumulative' => $actualVolPct,
+            ];
+
+            $costCurve[] = [
+                'period'            => $period,
+                'plan_cumulative'   => round($cumPlanCost, 2),
+                'actual_cumulative' => round($cumActualCost, 2),
             ];
         }
 
-        foreach ($actualCost as $row) {
-            $cumulativeCost += $row->amount;
-            if (isset($actualSeries[$row->period])) {
-                $actualSeries[$row->period]['cumulative_cost'] = $cumulativeCost;
-            } else {
-                $actualSeries[$row->period] = [
-                    'period' => $row->period,
-                    'cumulative_volume' => $cumulativeVolume,
-                    'cumulative_cost' => $cumulativeCost,
-                ];
-            }
+        // ── Deviations: ITEM nodes with significant cost deviation ────────────
+        $deviations = [];
+        if ($project->hasActiveBaseline()) {
+            $actualCostByNode = DB::table('actual_cost_transactions as act')
+                ->join('progress_entries as pe', 'pe.id', '=', 'act.progress_entry_id')
+                ->where('act.project_id', $project->id)
+                ->where('act.status', 'APPROVED')
+                ->selectRaw('pe.wbd_node_id, SUM(act.amount) as total_actual')
+                ->groupBy('pe.wbd_node_id')
+                ->pluck('total_actual', 'wbd_node_id');
+
+            $deviations = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
+                ->where('node_type', 'ITEM')
+                ->get()
+                ->map(function ($n) use ($actualCostByNode) {
+                    $plan   = (float) $n->planned_cost;
+                    $actual = (float) ($actualCostByNode[$n->id] ?? 0);
+                    $dev    = $plan > 0 ? round((($actual - $plan) / $plan) * 100, 2) : 0;
+                    return ['name' => $n->name, 'code' => $n->code, 'deviation_percent' => $dev];
+                })
+                ->filter(fn ($d) => abs($d['deviation_percent']) >= 5)
+                ->sortByDesc(fn ($d) => abs($d['deviation_percent']))
+                ->values()
+                ->toArray();
         }
 
         return response()->json([
             'success' => true,
             'message' => 'S-Curve data fetched successfully',
-            'data' => [
-                'actual_series' => array_values($actualSeries),
+            'data'    => [
+                'volume_curve' => $volumeCurve,
+                'cost_curve'   => $costCurve,
+                'insights'     => [],
+                'deviations'   => $deviations,
             ],
         ]);
     }
 
-    /**
-     * Cost analysis per WBD group/item.
-     */
+    // ─── GET /v1/projects/{project}/cost-analysis ────────────────────────────
+
+    #[OA\Get(
+        tags: [ANALYTICS_TAG],
+        path: "/v1/projects/{project}/cost-analysis",
+        operationId: "AnalyticsController@costAnalysis",
+        summary: "Cost analysis: baseline vs approved actual cost per root WBD node group. Approved data only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "project", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Cost analysis per WBD root node")]
+    #[ResponseDefault()]
     public function costAnalysis(Request $request, Project $project): JsonResponse
     {
         $project->load('activeWbdVersion');
@@ -214,17 +396,19 @@ class AnalyticsController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Cost analysis fetched',
-                'data' => [],
+                'data'    => [],
+                'meta'    => ['has_baseline' => false],
             ]);
         }
 
-        $nodes = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
-            ->whereNull('parent_node_id')
-            ->with('children')
+        $activeVersionId = $project->active_wbd_version_id;
+
+        // All nodes (flat) for the active version
+        $nodes = WbdNode::where('wbd_version_id', $activeVersionId)
             ->orderBy('sort_order')
             ->get();
 
-        // Actual approved cost per node via progress_entries
+        // Approved actual cost grouped by WBD node (via progress entries)
         $actualCostByNode = DB::table('actual_cost_transactions as act')
             ->join('progress_entries as pe', 'pe.id', '=', 'act.progress_entry_id')
             ->where('act.project_id', $project->id)
@@ -233,35 +417,56 @@ class AnalyticsController extends Controller
             ->groupBy('pe.wbd_node_id')
             ->pluck('total_actual', 'wbd_node_id');
 
-        $totalBaseline = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
-            ->whereNull('parent_node_id')
-            ->sum('planned_cost');
+        $totalBaselineCost = (float) $nodes->whereNull('parent_node_id')->sum('planned_cost');
 
-        $analysis = $nodes->map(function ($node) use ($actualCostByNode, $totalBaseline) {
-            $actualCost = $actualCostByNode[$node->id] ?? 0;
-            $deviation = $actualCost - $node->planned_cost;
-            $weight = $totalBaseline > 0 ? ($node->planned_cost / $totalBaseline) * 100 : 0;
+        $analysis = $nodes->map(function ($node) use ($actualCostByNode, $totalBaselineCost) {
+            $baseline   = (float) $node->planned_cost;
+            $actual     = (float) ($actualCostByNode[$node->id] ?? 0);
+            $deviation  = $actual - $baseline;
+            $weight     = $totalBaselineCost > 0 ? ($baseline / $totalBaselineCost) * 100 : 0;
 
             return [
-                'id' => $node->id,
-                'code' => $node->code,
-                'name' => $node->name,
-                'node_type' => $node->node_type,
-                'baseline_cost' => (float) $node->planned_cost,
-                'actual_cost_approved' => (float) $actualCost,
-                'deviation' => (float) $deviation,
-                'deviation_percent' => $node->planned_cost > 0
-                    ? round(($deviation / $node->planned_cost) * 100, 2)
+                'id'                   => $node->id,
+                'parent_node_id'       => $node->parent_node_id,
+                'code'                 => $node->code,
+                'name'                 => $node->name,
+                'node_type'            => $node->node_type,
+                'weight_percent'       => round($weight, 2),
+                'baseline_cost'        => $baseline,
+                'actual_cost_approved' => $actual,
+                'deviation'            => $deviation,
+                'deviation_percent'    => $baseline > 0
+                    ? round(($deviation / $baseline) * 100, 2)
                     : 0,
-                'weight_percent' => round($weight, 2),
-                'is_over_budget' => $deviation > 0,
+                'is_over_budget'       => $deviation > 0,
             ];
         });
+
+        $flatNodes = $analysis->map(function ($node) {
+            return array_merge($node, [
+                'planned_cost' => $node['baseline_cost'],
+                'actual_cost'  => $node['actual_cost_approved'],
+            ]);
+        });
+
+        $totalActualCost = $flatNodes->sum('actual_cost');
 
         return response()->json([
             'success' => true,
             'message' => 'Cost analysis fetched successfully',
-            'data' => $analysis,
+            'data'    => [
+                'items'   => $flatNodes->values(),
+                'groups'  => $flatNodes->where('node_type', 'GROUP')->values(),
+                'summary' => [
+                    'total_baseline_cost' => $totalBaselineCost,
+                    'total_actual_cost'   => $totalActualCost,
+                ],
+            ],
+            'meta'    => [
+                'has_baseline'     => true,
+                'baseline_version' => $project->activeWbdVersion->version_number,
+                'total_baseline'   => $totalBaselineCost,
+            ],
         ]);
     }
 }

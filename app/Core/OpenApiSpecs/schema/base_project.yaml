@@ -1,0 +1,39 @@
+type: object
+properties:
+  project_code:
+    type: string
+    example: "PRJ-001"
+    min: 3
+    max: 200
+  project_name:
+    type: string
+    example: "Replanting Kebun 2026"
+    min: 2
+    max: 200
+  client_name:
+    type: string
+    example: "Internal"
+    min: 3
+    max: 200
+  location:
+    type: string
+    example: "Estate 1"
+    min: 3
+    max: 200
+  start_date:
+    type: string
+    format: date
+    example: "2026-06-16"
+  end_date:
+    type: string
+    format: date
+    example: "2026-06-19"
+  status:
+    type: string
+    enum: [ACTIVE, INACTIVE] # Added INACTIVE as a logical guess
+    example: "ACTIVE"
+  description:
+    type: string
+    example: "Test Project"
+    nullable: true
+    max: 200

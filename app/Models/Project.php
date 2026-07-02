@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ProjectStatus;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -22,15 +23,20 @@ class Project extends Model
         'description',
         'active_wbd_version_id',
         'created_by',
+        'submissions_reset_at',
     ];
 
     protected function casts(): array
     {
         return [
-            'start_date' => 'date',
-            'end_date' => 'date',
+            'start_date'           => 'date',
+            'end_date'             => 'date',
+            'status'               => ProjectStatus::class,
+            'submissions_reset_at' => 'datetime',
         ];
     }
+
+    // ─── Relationships ────────────────────────────────────────────────────────
 
     public function createdBy(): BelongsTo
     {
@@ -67,8 +73,43 @@ class Project extends Model
         return $this->hasMany(ReportRecord::class);
     }
 
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
     public function hasActiveBaseline(): bool
     {
         return $this->active_wbd_version_id !== null;
+    }
+
+    // ─── Query Scope ─────────────────────────────────────────────────────────
+
+    /**
+     * Reusable scope for list / search / filter / sort.
+     * Usage: Project::projects($queryParams)->paginate()
+     */
+    public function scopeProjects($query, array $queryParams): void
+    {
+        $query
+            ->with(['createdBy.role', 'activeWbdVersion'])
+            ->when($queryParams['search'] ?? null, function ($q, $search) {
+                $q->where(function ($inner) use ($search) {
+                    $inner->where('project_name', 'like', "%{$search}%")
+                          ->orWhere('project_code', 'like', "%{$search}%")
+                          ->orWhere('client_name',  'like', "%{$search}%");
+                });
+            })
+            ->when($queryParams['filter'] ?? null, function ($q, $filter) {
+                if (array_key_exists('status', $filter)) {
+                    $q->where('status', $filter['status']);
+                }
+                if (array_key_exists('client_name', $filter)) {
+                    $q->where('client_name', 'like', '%' . $filter['client_name'] . '%');
+                }
+            })
+            ->when($queryParams['sort-by'] ?? null, function ($q, $sortBy) use ($queryParams) {
+                $sortDir = $queryParams['sort-dir'] ?? 'asc';
+                $q->orderBy($sortBy, $sortDir);
+            }, function ($q) {
+                $q->orderBy('project_name', 'asc');
+            });
     }
 }

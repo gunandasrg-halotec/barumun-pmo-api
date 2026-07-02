@@ -1,0 +1,12 @@
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+    example: "cf404dbf-ea56-429b-b574-b7749c5f9a9e"
+  full_name:
+    type: string
+    example: "Administrator Sistem"
+  role:
+    type: string
+    example: "Administrator Sistem"

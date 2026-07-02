@@ -191,6 +191,8 @@ class WbdService
             $newNode = $node->replicate();
             $newNode->wbd_version_id = $targetVersionId;
             $newNode->parent_node_id = null; // will fix below
+            // Reset progress-related state — only plan structure is copied, not realisasi
+            $newNode->status = 'ACTIVE';
             $newNode->save();
             $idMap[$node->id] = $newNode->id;
         }

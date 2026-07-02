@@ -7,6 +7,7 @@ use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Http\Resources\LoginResource;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Attributes\UseResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,6 +39,7 @@ class AuthController extends Controller
 
         $token = $loginRequest->authenticate();
         $user = Auth::user();
+        $user->update(["last_login_at"=>Carbon::now()]);
         $user = new LoginResource($user);
         return response()->json([
             "user" => $user,

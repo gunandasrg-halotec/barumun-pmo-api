@@ -31,16 +31,16 @@ class Response200WithPagination extends Response
                     items: new Items(ref: $ref)
                 ),
                 new Property(
-                    property: "pagination",
+                    property: "meta",
                     type: "object",
                     properties: [
-                        new Property(property: "current_page", type: "integer", minimum: 1, example: 1, description: "current page number"),
-                        new Property(property: "from", type: "integer", minimum: 1, example: 1, description: "data start offset"),
-                        new Property(property: "to", type: "integer", minimum: 1, example: 1, description: "data end  offset"),
+                        new Property(property: "page", type: "integer", minimum: 1, example: 1, description: "current page number"),
+                        new Property(property: "limit", type: "integer", minimum: 1, example: 1, description: "data start offset"),
+                        // new Property(property: "to", type: "integer", minimum: 1, example: 1, description: "data end  offset"),
                         new Property(property: "total", type: "integer", minimum: 1, example: 1, description: "total number of data"),
-                        new Property(property: "last_page", type: "integer", minimum: 1, example: 1),
-                        new Property(property: "path", type: "string", example: "http://example.com/api/v1/resource", description: "resource path"),
-                        new Property(property: "per_page", type: "integer", minimum: 1, example: 20, description: "number of data on each page"),
+                        // new Property(property: "last_page", type: "integer", minimum: 1, example: 1),
+                        // new Property(property: "path", type: "string", example: "http://example.com/api/v1/resource", description: "resource path"),
+                        // new Property(property: "per_page", type: "integer", minimum: 1, example: 20, description: "number of data on each page"),
 
                     ]
                 )

@@ -6,6 +6,7 @@ use App\Core\GetIndexRequest;
 use App\Core\Response200WithPagination;
 use App\Core\Response2xx;
 use App\Core\ResponseDefault;
+use App\Enums\RoleName;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UserRequest;
 use App\Http\Resources\UserResource;
@@ -16,6 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 use OpenApi\Attributes\RequestBody;
 use OpenApi\Attributes\Schema;
@@ -31,9 +33,18 @@ class UserController extends Controller
         filters: [
             new OA\Parameter(
                 in: "query",
-                name: "filter[role_id]",
+                name: "filter[role]",
                 description: "filter by role id",
-                schema: new Schema(type: "string", format: "uuid")
+                schema: new Schema(
+                    type: "string",
+                    enum: [
+                        RoleName::ADMIN_PROYEK->name,
+                        RoleName::ADMINISTRATOR_SISTEM->name,
+                        RoleName::DIREKSI->name,
+                        RoleName::FINANCE->name,
+                        RoleName::PROJECT_MANAGER->name
+                    ]
+                )
 
             ),
             new OA\Parameter(
@@ -49,6 +60,7 @@ class UserController extends Controller
 
     public function index(UserRequest $request)
     {
+
         $models = UserResource::collection(User::
             accounts($request->only(["search", "filter", "sort-by", "sort-dir"]))
             ->paginate());
@@ -76,11 +88,20 @@ class UserController extends Controller
     {
         $validated = $request->validated();
 
+        // Resolve role name (e.g. "ADMIN_PROYEK") -> role_id, matching update().
+        $roleName = $validated['role'] ?? RoleName::ADMIN_PROYEK->name;
+        $roleCase = constant(RoleName::class . "::" . $roleName);
+        $theRole = Role::where("role_name", "=", $roleCase->value)->first();
+        if (!$theRole) {
+            abort(500, "ROLE WAS NOT FOUND IN DATABASE! ");
+        }
+
         $user = User::create([
             'full_name' => $validated['full_name'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
-            'role_id' => $validated['role_id'],
+            'phone' => $validated['phone'] ?? null,
+            'role_id' => $theRole->id,
             'is_active' => $validated['is_active'] ?? true,
         ]);
 
@@ -90,7 +111,7 @@ class UserController extends Controller
     }
 
 
-    #[OA\Put(
+    #[OA\Patch(
         tags: [USER_TAG],
         path: "/v1/user/{user}",
         operationId: "UserController@update",
@@ -108,18 +129,47 @@ class UserController extends Controller
         security: [Auth_JWT]
 
     )]
-    #[Response2xx(description: "User data updated.")]
+    #[Response2xx(description: "User data updated.", ref: "schemas/user_resource.yaml")]
     #[ResponseDefault()]
     public function update(UserRequest $request, User $user)
     {
-        // $this->authorizeAdminSistem($request);
-
         $validated = $request->validated();
 
+
+        //what is current user role?
+        $roleCode = $user->role->code;
+        
+        if ($roleCode == RoleName::ADMINISTRATOR_SISTEM->name) {
+            //check how many administrator system there without this user;
+            
+            $adminCount = User::where("role_id", "=", $user->role->id)
+                ->where("id", "<>", $user->id)
+                ->count();
+                
+            if ($adminCount == 0) {
+                throw ValidationException::withMessages([
+                    "role_id" => [
+                        "This user is the only {$user->role->role_name->value} right now. You can't remove it"
+                    ]
+                ]);
+            }
+
+        }
+        
         if (isset($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
         } else {
             unset($validated['password']);
+        }
+        if (isset($validated["role"])) {
+
+            $roleCase = constant(RoleName::class . "::" . $validated["role"]);
+            $theRole = Role::where("role_name", "=", $roleCase->value)->first();
+            if ($theRole)
+                $user->role_id = $theRole->id;
+            else
+                abort(500, "ROLE WAS NOT FOUND IN DATABASE! ");
+
         }
 
         $user->update($validated);
@@ -131,6 +181,57 @@ class UserController extends Controller
         ]);
     }
 
+    #[OA\Patch(
+        tags: [USER_TAG],
+        path: "/v1/user/{user}/toggle-active",
+        operationId: "UserController@setUserActivation",
+        summary: "Set user activation. Only Administrator System able to run this action",
+        parameters: [
+            new OA\Parameter(
+                in: "path",
+                name: "user",
+                schema: new Schema(type: 'string', format: "uuid")
+            )
+        ],
+        requestBody: new RequestBody(
+            content: new OA\JsonContent(ref: "schemas/activate_request.yaml")
+        ),
+        security: [Auth_JWT]
+
+    )]
+    #[Response2xx(200, description: "User data updated.", ref: "schemas/user_resource.yaml")]
+    #[ResponseDefault()]
+    public function setUserActivation(UserRequest $userRequest, User $user)
+    {
+
+        $validated = $userRequest->validated();
+        $user->is_active = $validated["is_active"];
+        $user->save();
+        return response()->json(new UserResource($user));
+
+    }
+
+    #[OA\Get(
+        tags: [USER_TAG],
+        path: "/v1/users/total-by-role",
+        operationId: "UserController@userTotalByRole",
+        summary: "Get Number of users group by Role",
+        responses: [
+            new Response2xx(ref: "user_total_by_role.yaml")
+
+        ],
+        security: [Auth_JWT]
+    )]
+    #[ResponseDefault()]
+    public function userTotalByRole(UserRequest $userRequest)
+    {
+        $models = User::groupBy("role_id")
+            ->with("role")
+            ->selectRaw("count(id) as n, role_id")->get();
+
+        $rvalue = $models->map(fn($item, $key) => ["key" => $item->role->role_name, "value" => $item->n]);
+        return $rvalue;
+    }
 
 
 }

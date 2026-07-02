@@ -23,11 +23,15 @@ class UserResource extends ModelResource
             'full_name' => $this->full_name,
             'email' => $this->email,
             'is_active' => $this->is_active,
+            'phone' => $this->phone,
             'role' => [
                 'id' => $this->role->id,
                 'name' => $this->role->role_name,
+                'code' => $this->role->code
             ],
-            'created_at' => $this->created_at
+            'created_at' => $this->created_at,
+            'last_login_at' => $this->last_login_at?->toDateTimeString()
+
         ];
     }
 }

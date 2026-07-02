@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -20,6 +21,16 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         //
-        
+        Password::defaults(function () {
+            $rule = Password::min(8)
+                ->letters()
+                ->numbers();
+
+            // Only enforce compromised leaks check in production environments
+            return app()->isProduction()
+                ? $rule->uncompromised()
+                : $rule;
+        });
+
     }
 }

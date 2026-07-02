@@ -1,23 +1,26 @@
 <?php
 
 return [
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    // Applies CORS settings to all API endpoints
+    'paths' => ['api/*'],
 
+    // Allows all HTTP Methods (POST, GET, OPTIONS, PUT, DELETE)
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => [
-        env('FRONTEND_URL', 'http://localhost:5173'),
-        'http://localhost:3000',
-        'http://localhost:5173',
-    ],
+    // 🚀 ALLOWS ALL ORIGINS (everywhere) safely since credentials are disabled
+    'allowed_origins' => ['*'],
 
     'allowed_origins_patterns' => [],
 
+    // Allows all incoming headers (Content-Type, Authorization, etc.)
     'allowed_headers' => ['*'],
 
-    'exposed_headers' => [],
+    // Explicitly expose the Authorization header if your JWT package 
+    // uses it to send refreshed tokens back to the frontend
+    'exposed_headers' => ['Authorization'],
 
-    'max_age' => 0,
+    'max_age' => 86400, // Cache preflight response for 24 hours to speed up requests
 
-    'supports_credentials' => true,
+    // 🚀 DISABLED because pure JWT authentication does not use cookies
+    'supports_credentials' => false,
 ];
