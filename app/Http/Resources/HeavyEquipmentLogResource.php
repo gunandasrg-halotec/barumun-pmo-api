@@ -51,10 +51,12 @@ class HeavyEquipmentLogResource extends ModelResource
                 'original_file_name' => $p->original_file_name,
                 'mime_type'          => $p->mime_type,
                 'photo_date'         => $p->photo_date?->toDateString(),
-                'download_url'       => route('heavy-equipment.photo.download', [
+                // Paksa https: app di balik proxy nginx, request internal ber-scheme
+                // http sehingga route() bisa menghasilkan http (mixed-content di web).
+                'download_url'       => str_replace('http://', 'https://', route('heavy-equipment.photo.download', [
                     'log'   => $p->heavy_equipment_log_id,
                     'photo' => $p->id,
-                ]),
+                ])),
             ])->values()),
             'created_at' => $this->created_at,
         ];
