@@ -15,7 +15,7 @@ class HeavyEquipmentSeeder extends Seeder
             'id'         => Str::uuid(),
             'code'       => 'EXC-01',
             'type'       => 'Excavator',
-            'brand'      => 'Komatsu PC200',
+            'brand'      => 'Hitachi',
             'is_active'  => true,
             'created_at' => now(),
             'updated_at' => now(),
