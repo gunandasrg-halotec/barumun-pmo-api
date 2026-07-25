@@ -27,8 +27,7 @@ class HeavyEquipmentSeeder extends Seeder
             ['Premi operator',      160000, 2],
             ['Jaga malam',          160000, 3],
             ['Minyak / BBM',        820000, 4],
-            ['Gaji bulanan',       1500000, 5],
-            ['Upah harian operator',     0, 6],
+            ['Upah harian operator',     0, 5],
         ];
 
         foreach ($items as [$name, $amount, $sort]) {
