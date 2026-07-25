@@ -1,0 +1,105 @@
+title: ProjectFileResource
+type: object
+properties:
+  id:
+    type: string
+    format: uuid
+    description: Primary key ID unik berkas (UUID)
+    example: "9b3c4f52-12a4-4bf3-8dfd-09827361a4b2"
+  project_id:
+    type: string
+    format: uuid
+    description: ID proyek yang berasosiasi dengan berkas ini (UUID)
+    example: "8c4d5f63-23b5-4cg4-9ege-10938472b5c3"
+  file_type:
+    type: string
+    maxLength: 20
+    enum: [DOCUMENT, IMAGE]
+    description: Kategori jenis berkas
+    example: "IMAGE"
+  original_file_name:
+    type: string
+    maxLength: 255
+    description: Nama asli berkas saat diunggah
+    example: "foto_pondasi_malam.png"
+  mime_type:
+    type: string
+    maxLength: 100
+    description: MIME type resmi dari berkas
+    example: "image/png"
+  caption:
+    type: string
+    maxLength: 500
+    nullable: true
+    description: Keterangan singkat atau caption foto/dokumen
+    example: "Pengecoran tiang pancang zona A"
+  photo_date:
+    type: string
+    format: date
+    nullable: true
+    description: Tanggal pengambilan foto (Format YYYY-MM-DD)
+    example: "2026-07-16"
+  note:
+    type: string
+    nullable: true
+    description: Catatan tambahan atau detail detail teknis berkas
+    example: "Menggunakan kamera saku dengan flash tambahan"
+  related_entity_type:
+    type: string
+    maxLength: 50
+    nullable: true
+    enum: [WBD_NODE, PROGRESS_ENTRY]
+    description: Jenis model entitas polymorphic yang berelasi
+    example: "PROGRESS_ENTRY"
+  related_entity_id:
+    type: string
+    format: uuid
+    nullable: true
+    description: ID entitas polymorphic yang berelasi (UUID)
+    example: "3a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d"
+  file_status:
+    type: string
+    maxLength: 20
+    default: "ACTIVE"
+    enum: [ACTIVE, ARCHIVED]
+    description: Status aktif berkas saat ini
+    example: "ACTIVE"
+  file_category:
+    type: object
+    nullable: true
+    description: Detail kategori berkas (Hanya muncul jika relation 'fileCategory' di-load)
+    properties:
+      id:
+        type: string
+        format: uuid
+        example: "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d"
+      category_name:
+        type: string
+        example: "Dokumentasi Struktur"
+  uploaded_by:
+    type: object
+    nullable: true
+    description: Detail user pengunggah berkas (Hanya muncul jika relation 'uploadedByUser' di-load)
+    properties:
+      id:
+        type: string
+        format: uuid
+        example: "5e4d3c2b-1a0f-9e8d-7c6b-5a4f3e2d1c0b"
+      full_name:
+        type: string
+        example: "Budiman Santoso"
+  uploaded_at:
+    type: string
+    format: date-time
+    description: Waktu pengunggahan berkas (Timestamp)
+    example: "2026-07-16T03:55:58Z"
+  file_size:
+    type: integer
+    nullable: true
+    description: Ukuran file dalam satuan byte (Menghasilkan null jika file tidak ditemukan secara fisik di storage)
+    example: 2097152
+  download_url:
+    type: string
+    format: uri
+    description: Endpoint URL untuk mengunduh berkas secara langsung
+    example: "https://api.example.com/files/9b3c4f52-12a4-4bf3-8dfd-09827361a4b2/download"

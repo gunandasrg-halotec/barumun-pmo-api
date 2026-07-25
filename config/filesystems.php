@@ -41,7 +41,7 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            'url' => rtrim(env('APP_URL', 'http://localhost'), '/') . '/storage',
             'visibility' => 'public',
             'throw' => false,
             'report' => false,
@@ -59,6 +59,18 @@ return [
             'throw' => false,
             'report' => false,
         ],
+        'oss' => [
+            'driver' => 'oss',
+            'access_key_id' => env('OSS_ACCESS_KEY_ID'),
+            'access_key_secret' => env('OSS_ACCESS_KEY_SECRET'),
+            'bucket' => env('OSS_BUCKET'),
+            'endpoint' => env('OSS_ENDPOINT'),
+            'url' => env('OSS_URL'),
+            'is_cname' => false, // Set to true if using a custom local domain
+            'security_token' => null,
+            'request_proxy' => null,
+        ],
+
 
     ],
 

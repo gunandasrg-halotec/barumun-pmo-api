@@ -14,8 +14,8 @@ services:
       - docker/staging/.env.dev
     ports:
       - "${APP_PORT:-80}:80"
-    # volumes:
-    #   - ./:/var/www/html
+    volumes:
+       - /home/ezra/projects/pmo-files:/var/www/html/storage/app/private
     networks:
       - pmo-backend-network
 

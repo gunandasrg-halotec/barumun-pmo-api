@@ -62,28 +62,33 @@ class AnalyticsController extends Controller
             ->whereNull('parent_node_id')
             ->sum('planned_cost');
 
-        // Approved actual cost
+        // Approved actual cost — filter to active WBD version only
         $totalApprovedCost = (float) ActualCostTransaction::where('project_id', $project->id)
             ->where('status', 'APPROVED')
+            ->whereHas('progressEntry.wbdNode', fn ($q) => $q->where('wbd_version_id', $activeVersionId))
             ->sum('amount');
 
-        // Official progress — approved entries only
+        // Official progress — approved entries, active WBD version only
         $officialProgressCount = ProgressEntry::where('project_id', $project->id)
             ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
+            ->whereHas('wbdNode', fn ($q) => $q->where('wbd_version_id', $activeVersionId))
             ->count();
 
-        // Pending items
+        // Pending items — active WBD version only
         $pendingProgressCount = ProgressEntry::where('project_id', $project->id)
-            ->where('status', 'PENDING_PM_APPROVAL')
+            ->whereIn('status', ['PENDING_PM_APPROVAL', 'PENDING_DIRECTOR_APPROVAL'])
+            ->whereHas('wbdNode', fn ($q) => $q->where('wbd_version_id', $activeVersionId))
             ->count();
 
         $pendingCostCount = ActualCostTransaction::where('project_id', $project->id)
             ->where('status', 'REVIEW')
+            ->whereHas('progressEntry.wbdNode', fn ($q) => $q->where('wbd_version_id', $activeVersionId))
             ->count();
 
-        // ── Realisasi totals ─────────────────────────────────────────────────────
+        // ── Realisasi totals — filter to active WBD version only ────────────────
         $approvedVolume = (float) ProgressEntry::where('project_id', $project->id)
             ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
+            ->whereHas('wbdNode', fn ($q) => $q->where('wbd_version_id', $activeVersionId))
             ->sum('progress_volume');
 
         // ── Planned progress % from baseline schedule (volume & cost) ─────────
@@ -92,26 +97,45 @@ class AnalyticsController extends Controller
         $today = \Carbon\Carbon::today();
         $todayPeriod = $today->format('Y-m');
 
-        $itemNodes = WbdNode::where('wbd_version_id', $activeVersionId)
-            ->where('node_type', 'ITEM')
-            ->whereNotNull('start_date')
-            ->whereNotNull('end_date')
-            ->get();
+        $allNodesForDashboard = WbdNode::where('wbd_version_id', $activeVersionId)
+            ->get()
+            ->keyBy('id');
 
         $totalPlannedVolume    = 0.0;
         $totalPlannedCost      = 0.0;
         $scheduledVolToDate    = 0.0;
         $scheduledCostToDate   = 0.0;
 
-        foreach ($itemNodes as $node) {
-            $start        = \Carbon\Carbon::parse($node->start_date)->startOfMonth();
-            $end          = \Carbon\Carbon::parse($node->end_date)->startOfMonth();
+        foreach ($allNodesForDashboard->filter(fn ($n) => $n->node_type === 'ITEM') as $node) {
+            $totalPlannedVolume += (float) $node->volume;
+            $totalPlannedCost   += (float) $node->planned_cost;
+
+            // Resolve dates: use node's own, or walk up ancestors
+            $startDate = $node->start_date;
+            $endDate   = $node->end_date;
+
+            if (!$startDate || !$endDate) {
+                $parentId = $node->parent_node_id;
+                while ($parentId && isset($allNodesForDashboard[$parentId])) {
+                    $parent = $allNodesForDashboard[$parentId];
+                    if ($parent->start_date && $parent->end_date) {
+                        $startDate = $parent->start_date;
+                        $endDate   = $parent->end_date;
+                        break;
+                    }
+                    $parentId = $parent->parent_node_id;
+                }
+            }
+
+            if (!$startDate || !$endDate) {
+                continue;
+            }
+
+            $start        = \Carbon\Carbon::parse($startDate)->startOfMonth();
+            $end          = \Carbon\Carbon::parse($endDate)->startOfMonth();
             $months       = $start->diffInMonths($end) + 1;
             $volPerMonth  = $months > 0 ? ((float) $node->volume / $months) : 0;
             $costPerMonth = $months > 0 ? ((float) $node->planned_cost / $months) : 0;
-
-            $totalPlannedVolume += (float) $node->volume;
-            $totalPlannedCost   += (float) $node->planned_cost;
 
             $cur = $start->copy();
             for ($i = 0; $i < $months; $i++) {
@@ -122,17 +146,6 @@ class AnalyticsController extends Controller
                 $cur->addMonth();
             }
         }
-
-        // For nodes without schedule dates, add their full volume/cost to total
-        // but not to scheduled (they have no timeline basis).
-        $totalPlannedVolume += (float) WbdNode::where('wbd_version_id', $activeVersionId)
-            ->where('node_type', 'ITEM')
-            ->where(fn ($q) => $q->whereNull('start_date')->orWhereNull('end_date'))
-            ->sum('volume');
-        $totalPlannedCost += (float) WbdNode::where('wbd_version_id', $activeVersionId)
-            ->where('node_type', 'ITEM')
-            ->where(fn ($q) => $q->whereNull('start_date')->orWhereNull('end_date'))
-            ->sum('planned_cost');
 
         // Planned % = scheduled-to-date / total planned
         $plannedProgressPercent = $totalPlannedVolume > 0
@@ -156,8 +169,10 @@ class AnalyticsController extends Controller
                 $join->on('pe.wbd_node_id', '=', 'latest.wbd_node_id')
                      ->on('pe.progress_date', '=', 'latest.max_date');
             })
+            ->join('wbd_nodes as wn', 'pe.wbd_node_id', '=', 'wn.id')
             ->where('pe.project_id', $project->id)
             ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
+            ->where('wn.wbd_version_id', $activeVersionId)
             ->whereNotNull('pe.remaining_volume')
             ->select('pe.wbd_node_id', 'pe.remaining_volume')
             ->get();
@@ -180,8 +195,10 @@ class AnalyticsController extends Controller
                 $join->on('pe.wbd_node_id', '=', 'latest.wbd_node_id')
                      ->on('pe.progress_date', '=', 'latest.max_date');
             })
+            ->join('wbd_nodes as wn', 'pe.wbd_node_id', '=', 'wn.id')
             ->where('pe.project_id', $project->id)
             ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
+            ->where('wn.wbd_version_id', $activeVersionId)
             ->whereNotNull('pe.remaining_cost')
             ->select('pe.wbd_node_id', 'pe.remaining_cost')
             ->get();
@@ -216,6 +233,9 @@ class AnalyticsController extends Controller
                 'actual_progress_percent'       => $actualProgressPercent,
                 'planned_cost_percent'          => $plannedCostPercent,
                 'actual_cost_percent'           => $actualCostPercent,
+                'cost_vs_baseline_percent'      => $totalBaselineCost > 0
+                    ? min(100, round(($totalApprovedCost / $totalBaselineCost) * 100, 2))
+                    : 0,
                 'total_official_progress_count' => $officialProgressCount,
                 'pending_progress_approval'     => $pendingProgressCount,
                 'pending_cost_review'           => $pendingCostCount,
@@ -269,19 +289,43 @@ class AnalyticsController extends Controller
         $totalPlannedVolume = 0.0;
 
         if ($project->hasActiveBaseline()) {
-            $itemNodes = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
-                ->where('node_type', 'ITEM')
-                ->whereNotNull('start_date')
-                ->whereNotNull('end_date')
-                ->get();
+            // Load all nodes (ITEM + GROUP) so we can fall back to parent dates
+            $allNodes = WbdNode::where('wbd_version_id', $project->active_wbd_version_id)
+                ->get()
+                ->keyBy('id');
+
+            $itemNodes = $allNodes->filter(fn ($n) => $n->node_type === 'ITEM');
 
             foreach ($itemNodes as $node) {
-                $start        = \Carbon\Carbon::parse($node->start_date)->startOfMonth();
-                $end          = \Carbon\Carbon::parse($node->end_date)->startOfMonth();
+                $totalPlannedVolume += (float) $node->volume;
+
+                // Resolve dates: use node's own dates, or walk up ancestors for fallback
+                $startDate = $node->start_date;
+                $endDate   = $node->end_date;
+
+                if (!$startDate || !$endDate) {
+                    $parentId = $node->parent_node_id;
+                    while ($parentId && isset($allNodes[$parentId])) {
+                        $parent = $allNodes[$parentId];
+                        if ($parent->start_date && $parent->end_date) {
+                            $startDate = $parent->start_date;
+                            $endDate   = $parent->end_date;
+                            break;
+                        }
+                        $parentId = $parent->parent_node_id;
+                    }
+                }
+
+                if (!$startDate || !$endDate) {
+                    // No date available anywhere in ancestor chain — skip distribution only
+                    continue;
+                }
+
+                $start        = \Carbon\Carbon::parse($startDate)->startOfMonth();
+                $end          = \Carbon\Carbon::parse($endDate)->startOfMonth();
                 $months       = $start->diffInMonths($end) + 1;
                 $volPerMonth  = $months > 0 ? ((float) $node->volume / $months) : 0;
                 $costPerMonth = $months > 0 ? ((float) $node->planned_cost / $months) : 0;
-                $totalPlannedVolume += (float) $node->volume;
 
                 $cur = $start->copy();
                 for ($i = 0; $i < $months; $i++) {

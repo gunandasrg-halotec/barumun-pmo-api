@@ -29,7 +29,7 @@ class GetIndexRequest extends BaseGet
      * @param mixed $security
      * @param mixed $tags
      * @param string[]|null $parameters
-     * @param \OpenApi\Attributes\Parameter[]|null $filters
+     * @param Parameter[]|null $filters
      * @param mixed $externalDocs
      * @param mixed $x
      */
@@ -66,6 +66,7 @@ class GetIndexRequest extends BaseGet
 
             return $rvalue;
         }, $parameters);
+        $filters ??=[];
         $parameters = array_merge($parameters, $filters);
 
         parent::__construct(array_filter([

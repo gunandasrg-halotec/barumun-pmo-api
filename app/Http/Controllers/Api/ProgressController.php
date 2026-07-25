@@ -19,7 +19,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
 use OpenApi\Attributes as OA;
 use OpenApi\Attributes\Schema;
-
+use Illuminate\Support\Str;
 class ProgressController extends Controller
 {
     public function __construct(private ProgressService $progressService)
@@ -93,6 +93,17 @@ class ProgressController extends Controller
             $query->whereDate('progress_date', '<=', $filter['date_to']);
         }
 
+        // Aggregate totals across ALL filtered entries (not just current page)
+        $totalsQuery = clone $query;
+        $totalVolume = (float) (clone $totalsQuery)->sum('progress_volume');
+        $totalCost   = (float) \App\Models\ActualCostTransaction::whereIn(
+            'progress_entry_id',
+            (clone $totalsQuery)->select('id')
+        )->sum('amount');
+        $pendingCount = (int) (clone $totalsQuery)
+            ->whereIn('status', ['PENDING_PM_APPROVAL', 'PENDING_DIRECTOR_APPROVAL'])
+            ->count();
+
         $entries = $query->paginate($request->get('per-page', 20));
 
         return response()->json([
@@ -100,9 +111,12 @@ class ProgressController extends Controller
             'message' => 'Progress entries fetched successfully',
             'data' => ProgressResource::collection($entries),
             'meta' => [
-                'page' => $entries->currentPage(),
-                'limit' => $entries->perPage(),
-                'total' => $entries->total(),
+                'page'           => $entries->currentPage(),
+                'limit'          => $entries->perPage(),
+                'total'          => $entries->total(),
+                'total_volume'   => $totalVolume,
+                'total_cost'     => $totalCost,
+                'pending_count'  => $pendingCount,
             ],
         ]);
     }
@@ -257,7 +271,9 @@ class ProgressController extends Controller
             return response()->json(['message' => 'Entry ini tidak memiliki lampiran.'], 404);
         }
 
-        $disk = Storage::disk('local');
+        $diskname = Str::startsWith($progressEntry->attachment_path, "pmo/") == true ? "s3" : "local";
+        
+        $disk = Storage::disk($diskname);
 
         if (!$disk->exists($progressEntry->attachment_path)) {
             \Log::warning('Progress attachment missing from disk', [

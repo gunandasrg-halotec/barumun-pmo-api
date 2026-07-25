@@ -15,7 +15,9 @@ use Illuminate\Support\Facades\Storage;
 
 class ProgressService
 {
-    public function __construct(private AuditLogService $auditLog) {}
+    public function __construct(private AuditLogService $auditLog)
+    {
+    }
 
     /**
      * Create a new progress entry.
@@ -74,7 +76,7 @@ class ProgressService
             ->first();
 
         if ($latestEntry && isset($data['progress_date'])) {
-            $newDate    = \Carbon\Carbon::parse($data['progress_date']);
+            $newDate = \Carbon\Carbon::parse($data['progress_date']);
             $latestDate = \Carbon\Carbon::parse($latestEntry->progress_date);
             if ($newDate->lt($latestDate)) {
                 throw new \RuntimeException(
@@ -134,20 +136,20 @@ class ProgressService
             $actualCost = $data['actual_cost'] ?? null;
             if ($actualCost !== null && $actualCost > 0) {
                 ActualCostTransaction::create([
-                    'project_id'        => $project->id,
+                    'project_id' => $project->id,
                     'progress_entry_id' => $progress->id,
-                    'amount'            => $actualCost,
-                    'transaction_date'  => $data['progress_date'],
-                    'description'       => $data['note'] ?? null,
-                    'entered_by'        => $enteredBy->id,
-                    'status'            => 'APPROVED',
+                    'amount' => $actualCost,
+                    'transaction_date' => $data['progress_date'],
+                    'description' => $data['note'] ?? null,
+                    'entered_by' => $enteredBy->id,
+                    'status' => 'APPROVED',
                 ]);
             }
 
             // Store attachment if provided
             if (!empty($data['attachment'])) {
                 $file = $data['attachment'];
-                $path = $file->store('progress-attachments/' . $project->id, 'local');
+                $path = $file->store(BucketFolder . '/progress-attachments/' . $project->id, 's3');
                 $progress->update(['attachment_path' => $path]);
             }
 
@@ -175,17 +177,19 @@ class ProgressService
                 $node->volume !== null &&
                 ((float) $data['progress_volume'] + $remainingVolume) > (float) $node->volume
             ) {
-                $directors = User::whereHas('role', fn ($q) =>
+                $directors = User::whereHas(
+                    'role',
+                    fn($q) =>
                     $q->where('role_name', RoleName::DIREKSI->value)
                 )->get();
 
                 foreach ($directors as $director) {
                     Notification::create([
-                        'user_id'      => $director->id,
+                        'user_id' => $director->id,
                         'triggered_by' => $enteredBy->id,
-                        'type'         => 'OVER_BUDGET_RISK',
-                        'title'        => 'Potensi Over Budget: ' . $node->name,
-                        'message'      => sprintf(
+                        'type' => 'OVER_BUDGET_RISK',
+                        'title' => 'Potensi Over Budget: ' . $node->name,
+                        'message' => sprintf(
                             '%s mencatat realisasi %s %s dengan estimasi sisa %s %s, ' .
                             'melebihi rencana %s %s untuk item "%s" pada proyek "%s".',
                             $enteredBy->full_name,
@@ -199,14 +203,14 @@ class ProgressService
                             $project->name
                         ),
                         'data' => [
-                            'project_id'        => $project->id,
-                            'project_name'      => $project->name,
-                            'wbd_node_id'       => $node->id,
-                            'wbd_node_name'     => $node->name,
+                            'project_id' => $project->id,
+                            'project_name' => $project->name,
+                            'wbd_node_id' => $node->id,
+                            'wbd_node_name' => $node->name,
                             'progress_entry_id' => $progress->id,
-                            'volume_plan'       => (float) $node->volume,
-                            'volume_actual'     => (float) $data['progress_volume'],
-                            'volume_remaining'  => $remainingVolume,
+                            'volume_plan' => (float) $node->volume,
+                            'volume_actual' => (float) $data['progress_volume'],
+                            'volume_remaining' => $remainingVolume,
                         ],
                     ]);
                 }
@@ -218,7 +222,11 @@ class ProgressService
             ]);
 
             return $progress->fresh([
-                'project', 'wbdNode', 'enteredByUser.role', 'approvedByUser', 'actualCostTransactions',
+                'project',
+                'wbdNode',
+                'enteredByUser.role',
+                'approvedByUser',
+                'actualCostTransactions',
             ]);
         });
     }

@@ -14,6 +14,7 @@ use App\Models\ProjectFile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use OpenApi\Attributes as OA;
 use OpenApi\Attributes\Schema;
 
@@ -28,22 +29,35 @@ class ProjectFileController extends Controller
         summary: "List active files for a project. Supports type and category filtering.",
         security: [Auth_JWT],
         filters: [
-            new OA\Parameter(in: "query", name: "filter[file_type]",
+            new OA\Parameter(
+                in: "query",
+                name: "filter[file_type]",
                 description: "Filter by file type",
-                schema: new Schema(type: "string", enum: ["DOCUMENT", "IMAGE"])),
-            new OA\Parameter(in: "query", name: "filter[file_category_id]",
+                schema: new Schema(type: "string", enum: ["DOCUMENT", "IMAGE"])
+            ),
+            new OA\Parameter(
+                in: "query",
+                name: "filter[file_category_id]",
                 description: "Filter by category UUID",
-                schema: new Schema(type: "string", format: "uuid")),
-            new OA\Parameter(in: "query", name: "filter[related_entity_type]",
+                schema: new Schema(type: "string", format: "uuid")
+            ),
+            new OA\Parameter(
+                in: "query",
+                name: "filter[related_entity_type]",
                 description: "Filter by related entity type",
-                schema: new Schema(type: "string", enum: ["WBD_NODE", "PROGRESS_ENTRY"])),
-            new OA\Parameter(in: "query", name: "filter[related_entity_id]",
+                schema: new Schema(type: "string", enum: ["WBD_NODE", "PROGRESS_ENTRY"])
+            ),
+            new OA\Parameter(
+                in: "query",
+                name: "filter[related_entity_id]",
                 description: "Filter by related entity UUID",
-                schema: new Schema(type: "string", format: "uuid")),
+                schema: new Schema(type: "string", format: "uuid")
+            ),
         ]
     )]
     #[Response200WithPagination(ref: "schemas/project_file_resource.yaml", description: "File list")]
     #[ResponseDefault()]
+
     public function index(ProjectFileRequest $request, Project $project): JsonResponse
     {
         $query = ProjectFile::with(['fileCategory', 'uploadedByUser'])
@@ -66,14 +80,14 @@ class ProjectFileController extends Controller
             $query->where('related_entity_id', $filter['related_entity_id']);
         }
 
-        $files = $query->paginate($request->get('per-page', 20));
+        $files = $query->paginate($request->input('per-page', 20));
 
         return response()->json([
             'success' => true,
             'message' => 'Files fetched successfully',
-            'data'    => ProjectFileResource::collection($files),
-            'meta'    => [
-                'page'  => $files->currentPage(),
+            'data' => ProjectFileResource::collection($files),
+            'meta' => [
+                'page' => $files->currentPage(),
                 'limit' => $files->perPage(),
                 'total' => $files->total(),
             ],
@@ -88,8 +102,12 @@ class ProjectFileController extends Controller
         operationId: "ProjectFileController@store",
         summary: "Upload a file to the project repository. IMAGE files require caption and photo_date. Allowed: PM, Admin Proyek.",
         parameters: [
-            new OA\Parameter(in: "path", name: "project", required: true,
-                schema: new Schema(type: "string", format: "uuid")),
+            new OA\Parameter(
+                in: "path",
+                name: "project",
+                required: true,
+                schema: new Schema(type: "string", format: "uuid")
+            ),
         ],
         requestBody: new OA\RequestBody(
             required: true,
@@ -107,29 +125,30 @@ class ProjectFileController extends Controller
         $data = $request->validated();
         $file = $request->file('file');
 
-        $storagePath = $file->store('project-files/' . $project->id, 'local');
+
+        $storagePath = $file->store(BucketFolder . '/project-files/' . $project->id, 's3');
 
         $projectFile = ProjectFile::create([
-            'project_id'          => $project->id,
+            'project_id' => $project->id,
             'related_entity_type' => $data['related_entity_type'] ?? null,
-            'related_entity_id'   => $data['related_entity_id'] ?? null,
-            'file_category_id'    => $data['file_category_id'],
-            'file_type'           => $data['file_type'],
-            'original_file_name'  => $file->getClientOriginalName(),
-            'storage_path'        => $storagePath,
-            'mime_type'           => $file->getMimeType(),
-            'caption'             => $data['caption'] ?? null,
-            'photo_date'          => $data['photo_date'] ?? null,
-            'note'                => $data['note'] ?? null,
-            'uploaded_by'         => $request->user()->id,
-            'uploaded_at'         => now(),
-            'file_status'         => 'ACTIVE',
+            'related_entity_id' => $data['related_entity_id'] ?? null,
+            'file_category_id' => $data['file_category_id'],
+            'file_type' => $data['file_type'],
+            'original_file_name' => $file->getClientOriginalName(),
+            'storage_path' => $storagePath,
+            'mime_type' => $file->getMimeType(),
+            'caption' => $data['caption'] ?? null,
+            'photo_date' => $data['photo_date'] ?? null,
+            'note' => $data['note'] ?? null,
+            'uploaded_by' => $request->user()->id,
+            'uploaded_at' => now(),
+            'file_status' => 'ACTIVE',
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'File uploaded successfully',
-            'data'    => new ProjectFileResource(
+            'data' => new ProjectFileResource(
                 $projectFile->load(['fileCategory', 'uploadedByUser'])
             ),
         ], 201);
@@ -143,8 +162,12 @@ class ProjectFileController extends Controller
         operationId: "ProjectFileController@show",
         summary: "Get file detail. All authenticated users.",
         parameters: [
-            new OA\Parameter(in: "path", name: "projectFile", required: true,
-                schema: new Schema(type: "string", format: "uuid")),
+            new OA\Parameter(
+                in: "path",
+                name: "projectFile",
+                required: true,
+                schema: new Schema(type: "string", format: "uuid")
+            ),
         ],
         security: [Auth_JWT]
     )]
@@ -157,7 +180,7 @@ class ProjectFileController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'File fetched successfully',
-            'data'    => new ProjectFileResource($projectFile),
+            'data' => new ProjectFileResource($projectFile),
         ]);
     }
 
@@ -169,8 +192,12 @@ class ProjectFileController extends Controller
         operationId: "ProjectFileController@destroy",
         summary: "Archive (soft-delete) a file. Sets file_status to ARCHIVED. Allowed: PM, Admin Proyek.",
         parameters: [
-            new OA\Parameter(in: "path", name: "projectFile", required: true,
-                schema: new Schema(type: "string", format: "uuid")),
+            new OA\Parameter(
+                in: "path",
+                name: "projectFile",
+                required: true,
+                schema: new Schema(type: "string", format: "uuid")
+            ),
         ],
         security: [Auth_JWT]
     )]
@@ -190,10 +217,13 @@ class ProjectFileController extends Controller
 
     public function download(ProjectFileRequest $request, ProjectFile $projectFile): Response
     {
-        abort_unless(Storage::exists($projectFile->storage_path), 404, 'File not found on disk.');
+        $diskname = Str::startsWith($projectFile->storage_path, "pmo") ? "s3" : "local";
+        $isExists = Storage::disk($diskname)->exists($projectFile->storage_path);
+        abort_unless($isExists, 404, 'File not found on disk.' . $diskname);
 
-        return response(Storage::get($projectFile->storage_path), 200, [
-            'Content-Type'        => $projectFile->mime_type,
+
+        return response(Storage::disk($diskname)->get($projectFile->storage_path), 200, [
+            'Content-Type' => $projectFile->mime_type,
             'Content-Disposition' => 'attachment; filename="' . $projectFile->original_file_name . '"',
         ]);
     }
