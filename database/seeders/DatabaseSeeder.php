@@ -12,6 +12,7 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             FileCategorySeeder::class,
             UserSeeder::class,
+            HeavyEquipmentSeeder::class,
         ]);
     }
 }

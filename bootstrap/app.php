@@ -6,6 +6,7 @@ use App\Enums\DeliveryProcessLogEnum;
 use App\Http\Middleware\ApiResponseHeader;
 use App\Http\Middleware\JwtAuthMiddleware;
 use App\Http\Middleware\KeyAuthMiddleware;
+use App\Http\Middleware\PinAuthMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             "jwtAuth" => JwtAuthMiddleware::class,
+            "pinAuth" => PinAuthMiddleware::class,
         ]);
 
         $middleware->api([ApiResponseHeader::class]);
