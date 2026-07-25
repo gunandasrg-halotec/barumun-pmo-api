@@ -10,6 +10,10 @@ class HeavyEquipment extends Model
 {
     use HasUuids;
 
+    // "equipment" dianggap uncountable oleh inflector Laravel → tabel default
+    // jadi "heavy_equipment". Set eksplisit agar cocok dengan migrasi.
+    protected $table = 'heavy_equipments';
+
     protected $fillable = ['code', 'type', 'brand', 'is_active'];
 
     protected function casts(): array
