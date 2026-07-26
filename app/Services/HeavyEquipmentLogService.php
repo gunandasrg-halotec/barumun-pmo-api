@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\HeavyEquipmentActivityType;
 use App\Models\HeavyEquipmentLog;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +17,7 @@ class HeavyEquipmentLogService
      */
     public function createFromPublic(array $data, array $photos = [], ?string $ip = null): HeavyEquipmentLog
     {
-        return DB::transaction(function () use ($data, $photos, $ip) {
+        $log = DB::transaction(function () use ($data, $photos, $ip) {
             $log = HeavyEquipmentLog::create([
                 'heavy_equipment_id'   => $data['heavy_equipment_id'],
                 'log_date'             => $data['log_date'],
@@ -73,6 +74,83 @@ class HeavyEquipmentLogService
 
             return $log->fresh(['equipment', 'activities', 'costs.costItem', 'photos']);
         });
+
+        // Kirim WA di luar transaksi agar tidak menahan koneksi DB saat HTTP call.
+        $this->sendWhatsAppNotification($log);
+
+        return $log;
+    }
+
+    private function sendWhatsAppNotification(HeavyEquipmentLog $log): void
+    {
+        $recipient = config('whatsapp.alat_berat_recipient');
+        if (! $recipient) {
+            return;
+        }
+
+        $message = $this->buildWhatsAppMessage($log);
+        app(WhatsAppService::class)->send($recipient, $message);
+    }
+
+    private function buildWhatsAppMessage(HeavyEquipmentLog $log): string
+    {
+        $months = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+                   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+        $date  = $log->log_date?->toDateString();
+        $parts = $date ? explode('-', $date) : [];
+        $tanggal = count($parts) === 3
+            ? (int)$parts[2] . ' ' . ($months[(int)$parts[1]] ?? '') . ' ' . $parts[0]
+            : ($date ?? '-');
+
+        $jamPagi  = $this->formatJamSesi($log->work_morning_start, $log->work_morning_end);
+        $jamSore  = $this->formatJamSesi($log->work_afternoon_start, $log->work_afternoon_end);
+        $jamKerja = array_filter([$jamPagi, $jamSore]);
+
+        $pekerjaan = [];
+        foreach ($log->activities ?? [] as $act) {
+            $label  = HeavyEquipmentActivityType::tryFrom($act->activity_type)?->label() ?? $act->activity_type;
+            $volume = $act->volume !== null ? number_format((float)$act->volume, 0, ',', '.') : null;
+            $unit   = $act->unit ?? '';
+            $pekerjaan[] = '- ' . $label . ($volume !== null ? ": {$volume} {$unit}" : '');
+        }
+
+        $bbm     = $log->fuel_liters !== null ? number_format((float)$log->fuel_liters, 0, ',', '.') . ' ltr' : '-';
+        $kenek   = $log->kenek ?: '-';
+        $area    = $log->area ? " ({$log->area})" : '';
+
+        $lines = [
+            '🚜 *Laporan Alat Berat Masuk*',
+            '',
+            '*Kebun*    : ' . $log->kebun . $area,
+            '*Tanggal*  : ' . $tanggal,
+            '*Jam Kerja*: ' . (implode(', ', $jamKerja) ?: '-'),
+            '*Operator* : ' . $log->operator,
+            '*Kenek*    : ' . $kenek,
+            '',
+            '*Pekerjaan*:',
+        ];
+
+        if ($pekerjaan) {
+            foreach ($pekerjaan as $p) {
+                $lines[] = $p;
+            }
+        } else {
+            $lines[] = '- (tidak ada pekerjaan)';
+        }
+
+        $lines[] = '';
+        $lines[] = '*BBM*      : ' . $bbm;
+
+        return implode("\n", $lines);
+    }
+
+    private function formatJamSesi(?string $start, ?string $end): string
+    {
+        if (! $start || ! $end) {
+            return '';
+        }
+        return substr($start, 0, 5) . '–' . substr($end, 0, 5);
     }
 
     /** Ubah "08.00" / "8:0" → "08:00"; kosong → null. */
