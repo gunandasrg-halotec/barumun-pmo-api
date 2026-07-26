@@ -159,10 +159,11 @@ class HeavyEquipmentLogService
         $photos = $log->photos ?? collect();
         if ($photos->isNotEmpty()) {
             try {
+                $expiry = now()->addDays(30);
                 $lines[] = '';
                 foreach ($photos as $i => $photo) {
                     if (!$photo->storage_path) continue;
-                    $photoUrl = Storage::disk('s3')->url($photo->storage_path);
+                    $photoUrl = Storage::disk('s3')->temporaryUrl($photo->storage_path, $expiry);
                     $lines[] = '📷 Foto ' . ($i + 1) . ': ' . $photoUrl;
                 }
             } catch (\Exception) {
