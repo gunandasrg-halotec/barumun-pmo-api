@@ -112,7 +112,8 @@ class HeavyEquipmentLogService
             $label  = HeavyEquipmentActivityType::tryFrom($act->activity_type)?->label() ?? $act->activity_type;
             $volume = $act->volume !== null ? number_format((float)$act->volume, 0, ',', '.') : null;
             $unit   = $act->unit ?? '';
-            $pekerjaan[] = '- ' . $label . ($volume !== null ? ": {$volume} {$unit}" : '');
+            $suffix = $volume !== null ? (': ' . $volume . ($unit ? ' ' . $unit : '')) : '';
+            $pekerjaan[] = '- ' . $label . $suffix;
         }
 
         $bbm     = $log->fuel_liters !== null ? number_format((float)$log->fuel_liters, 0, ',', '.') . ' ltr' : '-';

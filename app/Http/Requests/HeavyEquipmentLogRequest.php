@@ -41,6 +41,7 @@ class HeavyEquipmentLogRequest extends FormRequest
             'activities.*.start_time'    => ['nullable', 'string', 'max:10'],
             'activities.*.end_time'      => ['nullable', 'string', 'max:10'],
             'activities.*.volume'        => ['nullable', 'numeric', 'min:0'],
+            'activities.*.unit'          => ['nullable', 'string', 'max:20'],
 
             'costs'                 => ['nullable', 'array'],
             'costs.*.cost_item_id'  => ['required_with:costs', 'string', Rule::exists('heavy_equipment_cost_items', 'id')],
