@@ -8,6 +8,12 @@ use Illuminate\Http\Request;
 
 class HeavyEquipmentLogResource extends ModelResource
 {
+    /** MySQL TIME kembali sebagai "08:00:00" — potong ke "08:00" untuk tampilan. */
+    private static function shortTime(?string $t): ?string
+    {
+        return $t ? substr($t, 0, 5) : null;
+    }
+
     public function toArray(Request $request): array
     {
         return [
@@ -24,10 +30,10 @@ class HeavyEquipmentLogResource extends ModelResource
             'operator'             => $this->operator,
             'kenek'                => $this->kenek,
             'fuel_liters'          => $this->fuel_liters !== null ? (float) $this->fuel_liters : null,
-            'work_morning_start'   => $this->work_morning_start,
-            'work_morning_end'     => $this->work_morning_end,
-            'work_afternoon_start' => $this->work_afternoon_start,
-            'work_afternoon_end'   => $this->work_afternoon_end,
+            'work_morning_start'   => self::shortTime($this->work_morning_start),
+            'work_morning_end'     => self::shortTime($this->work_morning_end),
+            'work_afternoon_start' => self::shortTime($this->work_afternoon_start),
+            'work_afternoon_end'   => self::shortTime($this->work_afternoon_end),
             'note'                 => $this->note,
             'source'               => $this->source,
             'total_cost'           => (float) $this->total_cost,
@@ -37,8 +43,8 @@ class HeavyEquipmentLogResource extends ModelResource
                 'label'         => HeavyEquipmentActivityType::tryFrom($a->activity_type)?->label() ?? $a->activity_type,
                 'start_date'    => $a->start_date?->toDateString(),
                 'end_date'      => $a->end_date?->toDateString(),
-                'start_time'    => $a->start_time,
-                'end_time'      => $a->end_time,
+                'start_time'    => self::shortTime($a->start_time),
+                'end_time'      => self::shortTime($a->end_time),
                 'volume'        => $a->volume !== null ? (float) $a->volume : null,
                 'unit'          => $a->unit,
             ])->values()),
