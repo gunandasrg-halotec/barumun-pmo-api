@@ -35,6 +35,8 @@ class HeavyEquipmentLogResource extends ModelResource
                 'id'            => $a->id,
                 'activity_type' => $a->activity_type,
                 'label'         => HeavyEquipmentActivityType::tryFrom($a->activity_type)?->label() ?? $a->activity_type,
+                'start_date'    => $a->start_date?->toDateString(),
+                'end_date'      => $a->end_date?->toDateString(),
                 'start_time'    => $a->start_time,
                 'end_time'      => $a->end_time,
                 'volume'        => $a->volume !== null ? (float) $a->volume : null,

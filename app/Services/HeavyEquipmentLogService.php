@@ -40,6 +40,8 @@ class HeavyEquipmentLogService
                 }
                 $log->activities()->create([
                     'activity_type' => $activity['activity_type'],
+                    'start_date'    => $activity['start_date'] ?? null,
+                    'end_date'      => $activity['end_date'] ?? null,
                     'start_time'    => $this->normalizeTime($activity['start_time'] ?? null),
                     'end_time'      => $this->normalizeTime($activity['end_time'] ?? null),
                     'volume'        => $activity['volume'] ?? null,

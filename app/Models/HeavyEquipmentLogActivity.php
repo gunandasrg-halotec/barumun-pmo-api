@@ -13,6 +13,8 @@ class HeavyEquipmentLogActivity extends Model
     protected $fillable = [
         'heavy_equipment_log_id',
         'activity_type',
+        'start_date',
+        'end_date',
         'start_time',
         'end_time',
         'volume',
@@ -21,7 +23,11 @@ class HeavyEquipmentLogActivity extends Model
 
     protected function casts(): array
     {
-        return ['volume' => 'decimal:2'];
+        return [
+            'volume'     => 'decimal:2',
+            'start_date' => 'date',
+            'end_date'   => 'date',
+        ];
     }
 
     public function log(): BelongsTo
