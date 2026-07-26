@@ -46,9 +46,10 @@ class HeavyEquipmentAnalyticsService
             ];
         }
 
-        $daily      = [];
-        $byEquip    = [];
-        $byCostItem = [];
+        $daily         = [];
+        $byEquip       = [];
+        $byCostItem    = [];
+        $dailyActivity = []; // [date][activity_type] => volume
 
         foreach ($logs as $log) {
             $date = $log->log_date?->toDateString() ?? '';
@@ -88,6 +89,10 @@ class HeavyEquipmentAnalyticsService
                     if ($logTotalMin > 0) {
                         $byActivity[$type]['allocated_cost'] += $cost * ($mins / $logTotalMin);
                     }
+                }
+
+                if ($vol > 0) {
+                    $dailyActivity[$date][$type] = ($dailyActivity[$date][$type] ?? 0) + $vol;
                 }
             }
             $totalMeter += $logMeter;
@@ -135,6 +140,8 @@ class HeavyEquipmentAnalyticsService
                 'total_cost'    => $alloc,
                 'cost_per_unit' => ($row['unit'] && $volume > 0) ? round($alloc / $volume, 2) : null,
                 'cost_per_hour' => $hours > 0 ? round($alloc / $hours, 2) : null,
+                // Kecepatan kerja = hasil pekerjaan / jam kerja
+                'speed_per_hour' => ($row['unit'] && $hours > 0) ? round($volume / $hours, 2) : null,
             ];
         }
 
@@ -162,6 +169,29 @@ class HeavyEquipmentAnalyticsService
         }
         usort($byCostItemList, fn ($a, $b) => $b['total'] <=> $a['total']);
 
+        // Hasil kerja per hari per jenis pekerjaan (hanya tipe bersatuan/volume), + kumulatif per tipe.
+        $volumeTypes = array_values(array_filter(
+            HeavyEquipmentActivityType::cases(),
+            fn ($t) => $t->unit() !== null
+        ));
+        $cumByType = [];
+        $activityDailySeries = [];
+        foreach (array_keys($daily) as $date) {
+            $row = ['date' => $date];
+            foreach ($volumeTypes as $type) {
+                $vol = round($dailyActivity[$date][$type->value] ?? 0, 2);
+                $cumByType[$type->value] = ($cumByType[$type->value] ?? 0) + $vol;
+                $row[$type->value] = $vol;
+                $row[$type->value . '_cum'] = round($cumByType[$type->value], 2);
+            }
+            $activityDailySeries[] = $row;
+        }
+        $activityDailyTypes = array_map(fn ($t) => [
+            'value' => $t->value,
+            'label' => $t->label(),
+            'unit'  => $t->unit(),
+        ], $volumeTypes);
+
         return [
             'summary' => [
                 'total_days'        => $totalDays,
@@ -178,6 +208,8 @@ class HeavyEquipmentAnalyticsService
             'daily_series' => $dailySeries,
             'by_equipment' => array_values($byEquip),
             'by_cost_item' => $byCostItemList,
+            'activity_daily_series' => $activityDailySeries,
+            'activity_daily_types'  => $activityDailyTypes,
         ];
     }
 
