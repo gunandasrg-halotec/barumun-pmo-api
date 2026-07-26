@@ -6,6 +6,7 @@ use App\Enums\HeavyEquipmentActivityType;
 use App\Models\HeavyEquipmentLog;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class HeavyEquipmentLogService
 {
@@ -64,11 +65,18 @@ class HeavyEquipmentLogService
                 if (!$file instanceof UploadedFile) {
                     continue;
                 }
-                $storagePath = $file->store(BucketFolder . '/heavy-equipment-logs/' . $log->heavy_equipment_id, 's3');
+                $folder      = BucketFolder . '/heavy-equipment-logs/' . $log->heavy_equipment_id;
+                $compressed  = $this->compressForStorage($file);
+                $filename    = uniqid('', true) . '.jpg';
+                $storagePath = $folder . '/' . $filename;
+                Storage::disk('s3')->put($storagePath, fopen($compressed, 'r'));
+                if ($compressed !== $file->getRealPath()) {
+                    @unlink($compressed);
+                }
                 $log->photos()->create([
                     'storage_path'       => $storagePath,
                     'original_file_name' => $file->getClientOriginalName(),
-                    'mime_type'          => $file->getMimeType(),
+                    'mime_type'          => 'image/jpeg',
                 ]);
             }
 
@@ -148,7 +156,73 @@ class HeavyEquipmentLogService
         $lines[] = '';
         $lines[] = '*BBM*      : ' . $bbm;
 
+        $firstPhoto = $log->photos?->first();
+        if ($firstPhoto?->storage_path) {
+            try {
+                $photoUrl = Storage::disk('s3')->url($firstPhoto->storage_path);
+                $lines[] = '';
+                $lines[] = '📷 ' . $photoUrl;
+            } catch (\Exception) {
+                // foto lokal atau S3 tidak terkonfigurasi — lewati
+            }
+        }
+
         return implode("\n", $lines);
+    }
+
+    /**
+     * Kompres gambar pakai GD sebelum upload ke S3.
+     * Hasilkan path ke file temp JPEG. Jika sudah kecil atau format tak didukung,
+     * kembalikan path asli ($file->getRealPath()) sehingga caller bisa skip unlink.
+     */
+    private function compressForStorage(UploadedFile $file, int $maxDim = 1280, int $quality = 80): string
+    {
+        if (!extension_loaded('gd')) {
+            return $file->getRealPath();
+        }
+
+        $path = $file->getRealPath();
+        $mime = $file->getMimeType();
+
+        $src = match ($mime) {
+            'image/jpeg', 'image/jpg' => @imagecreatefromjpeg($path),
+            'image/png'               => @imagecreatefrompng($path),
+            'image/webp'              => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false,
+            default                   => false,
+        };
+
+        if (!$src) {
+            return $path;
+        }
+
+        $w     = imagesx($src);
+        $h     = imagesy($src);
+        $scale = min(1.0, $maxDim / max($w, $h));
+
+        if ($scale >= 1.0 && $mime === 'image/jpeg') {
+            imagedestroy($src);
+            return $path;
+        }
+
+        $nw  = (int) round($w * $scale);
+        $nh  = (int) round($h * $scale);
+        $dst = imagecreatetruecolor($nw, $nh);
+
+        if ($mime === 'image/png') {
+            imagealphablending($dst, false);
+            imagesavealpha($dst, true);
+            $white = imagecolorallocate($dst, 255, 255, 255);
+            imagefill($dst, 0, 0, $white);
+        }
+
+        imagecopyresampled($dst, $src, 0, 0, 0, 0, $nw, $nh, $w, $h);
+        imagedestroy($src);
+
+        $outPath = sys_get_temp_dir() . '/' . uniqid('pmo_img_', true) . '.jpg';
+        imagejpeg($dst, $outPath, $quality);
+        imagedestroy($dst);
+
+        return $outPath;
     }
 
     private function formatJamSesi(?string $start, ?string $end): string
