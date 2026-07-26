@@ -156,14 +156,17 @@ class HeavyEquipmentLogService
         $lines[] = '';
         $lines[] = '*BBM*      : ' . $bbm;
 
-        $firstPhoto = $log->photos?->first();
-        if ($firstPhoto?->storage_path) {
+        $photos = $log->photos ?? collect();
+        if ($photos->isNotEmpty()) {
             try {
-                $photoUrl = Storage::disk('s3')->url($firstPhoto->storage_path);
                 $lines[] = '';
-                $lines[] = '📷 ' . $photoUrl;
+                foreach ($photos as $i => $photo) {
+                    if (!$photo->storage_path) continue;
+                    $photoUrl = Storage::disk('s3')->url($photo->storage_path);
+                    $lines[] = '📷 Foto ' . ($i + 1) . ': ' . $photoUrl;
+                }
             } catch (\Exception) {
-                // foto lokal atau S3 tidak terkonfigurasi — lewati
+                // S3 tidak terkonfigurasi — lewati
             }
         }
 
