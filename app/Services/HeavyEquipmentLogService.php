@@ -120,9 +120,14 @@ class HeavyEquipmentLogService
         $kenek   = $log->kenek ?: '-';
         $area    = $log->area ? " ({$log->area})" : '';
 
+        $equipment = $log->equipment;
+        $alatId    = $equipment?->code ?? '-';
+        $alatNama  = trim(($equipment?->brand ?? '') . ' ' . ($equipment?->type ?? ''));
+
         $lines = [
-            '🚜 *Laporan Alat Berat Masuk*',
+            '🚜 *Laporan Penggunaan Alat Berat*',
             '',
+            '*Alat*     : [' . $alatId . '] ' . $alatNama,
             '*Kebun*    : ' . $log->kebun . $area,
             '*Tanggal*  : ' . $tanggal,
             '*Jam Kerja*: ' . (implode(', ', $jamKerja) ?: '-'),
