@@ -159,7 +159,7 @@ class HeavyEquipmentLogService
         $photos = $log->photos ?? collect();
         if ($photos->isNotEmpty()) {
             try {
-                $expiry = now()->addDays(30);
+                $expiry = now()->addDays(7);
                 $lines[] = '';
                 foreach ($photos as $i => $photo) {
                     if (!$photo->storage_path) continue;
