@@ -15,7 +15,7 @@ enum HeavyEquipmentActivityType: string
     {
         return match ($this) {
             self::ROLING        => 'Roling',
-            self::PARIT_BATAS   => 'Buat Parit Batas (3m x 3m x 3m)',
+            self::PARIT_BATAS   => 'Buat Parit Batas (3m x 3m x 2,5m)',
             self::PARIT_LEMBAH  => 'Buat Parit Lembah (1m x 1m x 1m)',
             self::CHIPPING      => 'Chipping',
             self::TUMBANG_POKOK => 'Tumbang Pokok Kayu',
