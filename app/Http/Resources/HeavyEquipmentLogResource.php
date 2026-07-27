@@ -3,7 +3,6 @@
 namespace App\Http\Resources;
 
 use App\Core\ModelResource;
-use App\Enums\HeavyEquipmentActivityType;
 use Illuminate\Http\Request;
 
 class HeavyEquipmentLogResource extends ModelResource
@@ -40,7 +39,6 @@ class HeavyEquipmentLogResource extends ModelResource
             'activities' => $this->whenLoaded('activities', fn () => $this->activities->map(fn ($a) => [
                 'id'            => $a->id,
                 'activity_type' => $a->activity_type,
-                'label'         => HeavyEquipmentActivityType::tryFrom($a->activity_type)?->label() ?? $a->activity_type,
                 'start_date'    => $a->start_date?->toDateString(),
                 'end_date'      => $a->end_date?->toDateString(),
                 'start_time'    => self::shortTime($a->start_time),
