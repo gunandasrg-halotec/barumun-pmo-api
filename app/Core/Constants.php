@@ -17,6 +17,7 @@ const AUDIT_TAG = "Audit Log";
 const PROFILE_TAG="User Profile";
 const HEAVY_EQUIPMENT_TAG = "Heavy Equipment";
 const HEAVY_EQUIPMENT_COST_TAG = "Heavy Equipment Cost Item";
+const HEAVY_EQUIPMENT_ACTIVITY_TYPE_TAG = "Heavy Equipment Activity Type";
 const HEAVY_EQUIPMENT_LOG_TAG = "Heavy Equipment Log";
 const HEAVY_EQUIPMENT_ANALYTICS_TAG = "Heavy Equipment Analytics";
 const HEAVY_EQUIPMENT_PUBLIC_TAG = "Heavy Equipment Public";

@@ -2,7 +2,7 @@
 
 namespace App\Http\Requests;
 
-use App\Enums\HeavyEquipmentActivityType;
+use App\Models\HeavyEquipmentActivityType;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -35,7 +35,7 @@ class HeavyEquipmentLogRequest extends FormRequest
             'note'                 => ['nullable', 'string', 'max:2000'],
 
             'activities'                 => ['nullable', 'array'],
-            'activities.*.activity_type' => ['required_with:activities', Rule::in(HeavyEquipmentActivityType::values())],
+            'activities.*.activity_type' => ['required_with:activities', Rule::in(HeavyEquipmentActivityType::where('is_active', true)->pluck('code')->all())],
             'activities.*.start_date'    => ['nullable', 'date'],
             'activities.*.end_date'      => ['nullable', 'date'],
             'activities.*.start_time'    => ['nullable', 'string', 'max:10'],

@@ -4,13 +4,14 @@ namespace App\Http\Controllers\Api;
 
 use App\Core\Response2xx;
 use App\Core\ResponseDefault;
-use App\Enums\HeavyEquipmentActivityType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\HeavyEquipmentLogRequest;
+use App\Http\Resources\HeavyEquipmentActivityTypeResource;
 use App\Http\Resources\HeavyEquipmentCostItemResource;
 use App\Http\Resources\HeavyEquipmentLogResource;
 use App\Http\Resources\HeavyEquipmentResource;
 use App\Models\HeavyEquipment;
+use App\Models\HeavyEquipmentActivityType;
 use App\Models\HeavyEquipmentCostItem;
 use App\Services\HeavyEquipmentLogService;
 use Illuminate\Http\JsonResponse;
@@ -84,10 +85,15 @@ class PublicHeavyEquipmentController extends Controller
     #[ResponseDefault()]
     public function activityTypes(): JsonResponse
     {
+        $types = HeavyEquipmentActivityType::where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get();
+
         return response()->json([
             'success' => true,
             'message' => 'Activity types fetched successfully',
-            'data'    => HeavyEquipmentActivityType::options(),
+            'data'    => HeavyEquipmentActivityTypeResource::collection($types),
         ]);
     }
 

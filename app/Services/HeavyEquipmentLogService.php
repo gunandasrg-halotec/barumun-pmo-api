@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Enums\HeavyEquipmentActivityType;
+use App\Models\HeavyEquipmentActivityType;
 use App\Models\HeavyEquipmentLog;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -115,9 +115,11 @@ class HeavyEquipmentLogService
         $jamSore  = $this->formatJamSesi($log->work_afternoon_start, $log->work_afternoon_end);
         $jamKerja = array_filter([$jamPagi, $jamSore]);
 
+        $typeNames = HeavyEquipmentActivityType::pluck('name', 'code');
+
         $pekerjaan = [];
         foreach ($log->activities ?? [] as $act) {
-            $label  = HeavyEquipmentActivityType::tryFrom($act->activity_type)?->label() ?? $act->activity_type;
+            $label  = $typeNames[$act->activity_type] ?? $act->activity_type;
             $volume = $act->volume !== null ? number_format((float)$act->volume, 0, ',', '.') : null;
             $unit   = $act->unit ?? '';
             $suffix = $volume !== null ? (': ' . $volume . ($unit ? ' ' . $unit : '')) : '';

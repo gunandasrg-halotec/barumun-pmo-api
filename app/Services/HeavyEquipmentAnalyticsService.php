@@ -2,14 +2,21 @@
 
 namespace App\Services;
 
-use App\Enums\HeavyEquipmentActivityType;
+use App\Models\HeavyEquipmentActivityType;
 use App\Models\HeavyEquipmentLog;
 use Carbon\Carbon;
 
 class HeavyEquipmentAnalyticsService
 {
-    private const METER_TYPES = ['PARIT_BATAS', 'PARIT_LEMBAH', 'BUKA_JALAN'];
-    private const POKOK_TYPES = ['CHIPPING', 'TUMBANG_POKOK'];
+    private function getMeterTypes(): array
+    {
+        return HeavyEquipmentActivityType::where('unit', 'm')->pluck('code')->all();
+    }
+
+    private function getPokokTypes(): array
+    {
+        return HeavyEquipmentActivityType::where('unit', 'pokok')->pluck('code')->all();
+    }
 
     /**
      * @param array{date_from?:string,date_to?:string,equipment_id?:string,kebun?:string} $filters
@@ -32,13 +39,17 @@ class HeavyEquipmentAnalyticsService
         $totalHours = 0.0;   // jam kerja dari sesi pagi/sore
         $totalCost  = 0.0;
 
+        $allTypes   = HeavyEquipmentActivityType::orderBy('sort_order')->orderBy('name')->get();
+        $meterTypes = $this->getMeterTypes();
+        $pokokTypes = $this->getPokokTypes();
+
         // Ringkasan per jenis pekerjaan: hasil kerja, jam kerja, biaya teralokasi
         $byActivity = [];
-        foreach (HeavyEquipmentActivityType::cases() as $type) {
-            $byActivity[$type->value] = [
-                'activity_type'  => $type->value,
-                'label'          => $type->label(),
-                'unit'           => $type->unit(),
+        foreach ($allTypes as $type) {
+            $byActivity[$type->code] = [
+                'activity_type'  => $type->code,
+                'label'          => $type->name,
+                'unit'           => $type->unit,
                 'total_volume'   => 0.0,
                 'total_minutes'  => 0.0,
                 'entry_count'    => 0,
@@ -75,9 +86,9 @@ class HeavyEquipmentAnalyticsService
                 $type = $act->activity_type;
                 $vol  = (float) ($act->volume ?? 0);
 
-                if (in_array($type, self::METER_TYPES, true)) {
+                if (in_array($type, $meterTypes, true)) {
                     $logMeter += $vol;
-                } elseif (in_array($type, self::POKOK_TYPES, true)) {
+                } elseif (in_array($type, $pokokTypes, true)) {
                     $logPokok += $vol;
                 }
 
@@ -170,27 +181,24 @@ class HeavyEquipmentAnalyticsService
         usort($byCostItemList, fn ($a, $b) => $b['total'] <=> $a['total']);
 
         // Hasil kerja per hari per jenis pekerjaan (hanya tipe bersatuan/volume), + kumulatif per tipe.
-        $volumeTypes = array_values(array_filter(
-            HeavyEquipmentActivityType::cases(),
-            fn ($t) => $t->unit() !== null
-        ));
+        $volumeTypes = $allTypes->filter(fn ($t) => $t->unit !== null)->values();
         $cumByType = [];
         $activityDailySeries = [];
         foreach (array_keys($daily) as $date) {
             $row = ['date' => $date];
             foreach ($volumeTypes as $type) {
-                $vol = round($dailyActivity[$date][$type->value] ?? 0, 2);
-                $cumByType[$type->value] = ($cumByType[$type->value] ?? 0) + $vol;
-                $row[$type->value] = $vol;
-                $row[$type->value . '_cum'] = round($cumByType[$type->value], 2);
+                $vol = round($dailyActivity[$date][$type->code] ?? 0, 2);
+                $cumByType[$type->code] = ($cumByType[$type->code] ?? 0) + $vol;
+                $row[$type->code] = $vol;
+                $row[$type->code . '_cum'] = round($cumByType[$type->code], 2);
             }
             $activityDailySeries[] = $row;
         }
-        $activityDailyTypes = array_map(fn ($t) => [
-            'value' => $t->value,
-            'label' => $t->label(),
-            'unit'  => $t->unit(),
-        ], $volumeTypes);
+        $activityDailyTypes = $volumeTypes->map(fn ($t) => [
+            'value' => $t->code,
+            'label' => $t->name,
+            'unit'  => $t->unit,
+        ])->values()->all();
 
         return [
             'summary' => [

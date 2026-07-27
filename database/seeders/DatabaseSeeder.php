@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             FileCategorySeeder::class,
             UserSeeder::class,
             HeavyEquipmentSeeder::class,
+            HeavyEquipmentActivityTypeSeeder::class,
         ]);
     }
 }
