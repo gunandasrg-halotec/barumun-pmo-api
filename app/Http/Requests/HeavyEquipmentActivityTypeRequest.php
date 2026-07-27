@@ -13,7 +13,7 @@ class HeavyEquipmentActivityTypeRequest extends FormRequest
             return true;
         }
 
-        return $this->user()->canManageMasterData();
+        return $this->user()->isAdministratorSistem();
     }
 
     public function rules(): array
