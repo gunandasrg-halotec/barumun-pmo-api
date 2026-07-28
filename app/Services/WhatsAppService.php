@@ -22,6 +22,12 @@ class WhatsAppService
             return;
         }
 
+        // Normalise Indonesian numbers: 08xxx → 628xxx
+        $phone = preg_replace('/\D/', '', $recipient);
+        if (str_starts_with($phone, '0')) {
+            $phone = '62' . substr($phone, 1);
+        }
+
         $endpoint = rtrim($baseUrl, '/');
         if (! str_ends_with($endpoint, '/send/message')) {
             $endpoint .= '/send/message';
@@ -32,7 +38,7 @@ class WhatsAppService
                 ->withHeaders(['X-Device-Id' => $deviceId])
                 ->timeout(5)
                 ->post($endpoint, [
-                    'phone'   => $recipient,
+                    'phone'   => $phone,
                     'message' => $message,
                 ]);
         } catch (\Exception $e) {
