@@ -15,9 +15,10 @@ use Illuminate\Support\Facades\Storage;
 
 class ProgressService
 {
-    public function __construct(private AuditLogService $auditLog)
-    {
-    }
+    public function __construct(
+        private AuditLogService $auditLog,
+        private WhatsAppService $whatsApp,
+    ) {}
 
     /**
      * Create a new progress entry.
@@ -221,6 +222,19 @@ class ProgressService
                 'entered_by_role' => $enteredBy->role->role_name,
             ]);
 
+            // WhatsApp: beritahu approver yang relevan
+            if ($status === ProgressStatus::PENDING_PM_APPROVAL->value) {
+                $msg = "Ada progress baru dari {$enteredBy->full_name} pada proyek {$project->name} menunggu persetujuan Anda";
+                User::whereHas('role', fn ($q) => $q->where('role_name', RoleName::PROJECT_MANAGER->value))
+                    ->whereNotNull('phone')->where('phone', '!=', '')
+                    ->each(fn ($u) => $this->whatsApp->send($u->phone, $msg));
+            } elseif ($status === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value) {
+                $msg = "Ada progress melebihi rencana pada pekerjaan {$node->name} di proyek {$project->name} menunggu persetujuan anda";
+                User::whereHas('role', fn ($q) => $q->where('role_name', RoleName::DIREKSI->value))
+                    ->whereNotNull('phone')->where('phone', '!=', '')
+                    ->each(fn ($u) => $this->whatsApp->send($u->phone, $msg));
+            }
+
             return $progress->fresh([
                 'project',
                 'wbdNode',
@@ -250,7 +264,9 @@ class ProgressService
             throw new \RuntimeException('Progress tidak dalam status yang dapat disetujui.');
         }
 
-        return DB::transaction(function () use ($progress, $approvedBy) {
+        $prevStatus = $progress->status;
+
+        return DB::transaction(function () use ($progress, $approvedBy, $prevStatus) {
             $progress->update([
                 'status' => ProgressStatus::APPROVED->value,
                 'approved_by' => $approvedBy->id,
@@ -259,7 +275,21 @@ class ProgressService
 
             $this->auditLog->logApprove('progress_entry', $progress->id);
 
-            return $progress->fresh();
+            $fresh = $progress->fresh(['wbdNode', 'project', 'enteredByUser']);
+            $nodeName = $fresh->wbdNode->name ?? '-';
+            $projectName = $fresh->project->name ?? '-';
+            $approverLabel = $prevStatus === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value
+                ? 'Direksi'
+                : 'Manajer Kebun';
+            $submitter = $fresh->enteredByUser;
+            if ($submitter?->phone) {
+                $this->whatsApp->send(
+                    $submitter->phone,
+                    "Progress {$nodeName} pada proyek {$projectName} telah disetujui {$approverLabel}"
+                );
+            }
+
+            return $fresh;
         });
     }
 
@@ -282,7 +312,9 @@ class ProgressService
             throw new \RuntimeException('Progress tidak dalam status yang dapat ditolak.');
         }
 
-        return DB::transaction(function () use ($progress, $rejectedBy, $reason) {
+        $prevStatus = $progress->status;
+
+        return DB::transaction(function () use ($progress, $rejectedBy, $reason, $prevStatus) {
             $progress->update([
                 'status' => ProgressStatus::REJECTED->value,
                 'rejected_by' => $rejectedBy->id,
@@ -292,7 +324,21 @@ class ProgressService
 
             $this->auditLog->logReject('progress_entry', $progress->id, $reason);
 
-            return $progress->fresh();
+            $fresh = $progress->fresh(['wbdNode', 'project', 'enteredByUser']);
+            $nodeName = $fresh->wbdNode->name ?? '-';
+            $projectName = $fresh->project->name ?? '-';
+            $approverLabel = $prevStatus === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value
+                ? 'Direksi'
+                : 'Manajer Kebun';
+            $submitter = $fresh->enteredByUser;
+            if ($submitter?->phone) {
+                $this->whatsApp->send(
+                    $submitter->phone,
+                    "Progress {$nodeName} pada proyek {$projectName} ditolak {$approverLabel}. Alasan: {$reason}"
+                );
+            }
+
+            return $fresh;
         });
     }
 }

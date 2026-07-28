@@ -2,15 +2,20 @@
 
 namespace App\Services;
 
+use App\Enums\RoleName;
 use App\Enums\WbdVersionStatus;
 use App\Models\Project;
+use App\Models\User;
 use App\Models\WbdNode;
 use App\Models\WbdVersion;
 use Illuminate\Support\Facades\DB;
 
 class WbdService
 {
-    public function __construct(private AuditLogService $auditLog) {}
+    public function __construct(
+        private AuditLogService $auditLog,
+        private WhatsAppService $whatsApp,
+    ) {}
 
     /**
      * Create a new DRAFT WBD version for a project.
@@ -58,7 +63,16 @@ class WbdService
 
             $this->auditLog->logSubmit('wbd_version', $version->id);
 
-            return $version->fresh();
+            $fresh = $version->fresh(['project']);
+            $projectName = $fresh->project->name ?? '-';
+            $versionNumber = $fresh->version_number;
+            $message = "WBD {$projectName} versi {$versionNumber} menunggu persetujuan Anda";
+
+            User::whereHas('role', fn ($q) => $q->where('role_name', RoleName::DIREKSI->value))
+                ->whereNotNull('phone')->where('phone', '!=', '')
+                ->each(fn ($u) => $this->whatsApp->send($u->phone, $message));
+
+            return $fresh;
         });
     }
 
@@ -96,7 +110,18 @@ class WbdService
 
             $this->auditLog->logApprove('wbd_version', $version->id);
 
-            return $version->fresh();
+            $fresh = $version->fresh(['project', 'submittedByUser']);
+            $projectName = $fresh->project->name ?? '-';
+            $versionNumber = $fresh->version_number;
+            $submitter = $fresh->submittedByUser;
+            if ($submitter?->phone) {
+                $this->whatsApp->send(
+                    $submitter->phone,
+                    "WBD {$projectName} versi {$versionNumber} telah disetujui Direksi"
+                );
+            }
+
+            return $fresh;
         });
     }
 
@@ -119,7 +144,18 @@ class WbdService
 
             $this->auditLog->logReject('wbd_version', $version->id, $reason);
 
-            return $version->fresh();
+            $fresh = $version->fresh(['project', 'submittedByUser']);
+            $projectName = $fresh->project->name ?? '-';
+            $versionNumber = $fresh->version_number;
+            $submitter = $fresh->submittedByUser;
+            if ($submitter?->phone) {
+                $this->whatsApp->send(
+                    $submitter->phone,
+                    "WBD {$projectName} versi {$versionNumber} ditolak Direksi. Alasan: {$reason}"
+                );
+            }
+
+            return $fresh;
         });
     }
 
