@@ -111,15 +111,16 @@ class WbdService
             $this->auditLog->logApprove('wbd_version', $version->id);
 
             $fresh = $version->fresh(['project', 'submittedByUser']);
-            $projectName = $fresh->project->name ?? '-';
+            $projectName = $fresh->project->project_name ?? '-';
             $versionNumber = $fresh->version_number;
-            $submitter = $fresh->submittedByUser;
-            if ($submitter?->phone) {
-                $this->whatsApp->send(
-                    $submitter->phone,
-                    "WBD {$projectName} versi {$versionNumber} telah disetujui Direksi"
-                );
-            }
+            $message = "WBD {$projectName} versi {$versionNumber} telah disetujui Direksi";
+
+            User::whereHas('role', fn ($q) => $q->whereIn('role_name', [
+                    RoleName::PROJECT_MANAGER->value,
+                    RoleName::ADMIN_PROYEK->value,
+                ]))
+                ->whereNotNull('phone')->where('phone', '!=', '')
+                ->each(fn ($u) => $this->whatsApp->send($u->phone, $message));
 
             return $fresh;
         });
@@ -145,15 +146,16 @@ class WbdService
             $this->auditLog->logReject('wbd_version', $version->id, $reason);
 
             $fresh = $version->fresh(['project', 'submittedByUser']);
-            $projectName = $fresh->project->name ?? '-';
+            $projectName = $fresh->project->project_name ?? '-';
             $versionNumber = $fresh->version_number;
-            $submitter = $fresh->submittedByUser;
-            if ($submitter?->phone) {
-                $this->whatsApp->send(
-                    $submitter->phone,
-                    "WBD {$projectName} versi {$versionNumber} ditolak Direksi. Alasan: {$reason}"
-                );
-            }
+            $message = "WBD {$projectName} versi {$versionNumber} ditolak Direksi. Alasan: {$reason}";
+
+            User::whereHas('role', fn ($q) => $q->whereIn('role_name', [
+                    RoleName::PROJECT_MANAGER->value,
+                    RoleName::ADMIN_PROYEK->value,
+                ]))
+                ->whereNotNull('phone')->where('phone', '!=', '')
+                ->each(fn ($u) => $this->whatsApp->send($u->phone, $message));
 
             return $fresh;
         });
