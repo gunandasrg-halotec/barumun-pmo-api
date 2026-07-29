@@ -22,10 +22,15 @@ class WhatsAppService
             return;
         }
 
-        // Normalise Indonesian numbers: 08xxx → 628xxx
-        $phone = preg_replace('/\D/', '', $recipient);
-        if (str_starts_with($phone, '0')) {
-            $phone = '62' . substr($phone, 1);
+        // Group JIDs (e.g. 628xxx-timestamp@g.us) must not be modified.
+        // Only normalise plain Indonesian numbers: 08xxx → 628xxx.
+        if (str_contains($recipient, '@')) {
+            $phone = $recipient;
+        } else {
+            $phone = preg_replace('/\D/', '', $recipient);
+            if (str_starts_with($phone, '0')) {
+                $phone = '62' . substr($phone, 1);
+            }
         }
 
         $endpoint = rtrim($baseUrl, '/');
