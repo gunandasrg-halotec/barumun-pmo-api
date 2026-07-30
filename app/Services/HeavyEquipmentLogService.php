@@ -27,6 +27,7 @@ class HeavyEquipmentLogService
                 'operator'             => $data['operator'],
                 'kenek'                => $data['kenek'] ?? null,
                 'fuel_liters'          => $data['fuel_liters'] ?? null,
+                'fuel_liters_dex_lite' => $data['fuel_liters_dex_lite'] ?? null,
                 'work_morning_start'   => $this->normalizeTime($data['work_morning_start'] ?? null),
                 'work_morning_end'     => $this->normalizeTime($data['work_morning_end'] ?? null),
                 'work_afternoon_start' => $this->normalizeTime($data['work_afternoon_start'] ?? null),
@@ -126,7 +127,10 @@ class HeavyEquipmentLogService
             $pekerjaan[] = '- ' . $label . $suffix;
         }
 
-        $bbm     = $log->fuel_liters !== null ? number_format((float)$log->fuel_liters, 0, ',', '.') . ' ltr' : '-';
+        $bbmParts = [];
+        if ($log->fuel_liters !== null)          $bbmParts[] = 'Solar: ' . number_format((float)$log->fuel_liters, 0, ',', '.') . ' ltr';
+        if ($log->fuel_liters_dex_lite !== null) $bbmParts[] = 'Dex Lite: ' . number_format((float)$log->fuel_liters_dex_lite, 0, ',', '.') . ' ltr';
+        $bbm = $bbmParts ? implode(', ', $bbmParts) : '-';
         $kenek   = $log->kenek ?: '-';
         $area    = $log->area ? " ({$log->area})" : '';
 

@@ -69,24 +69,24 @@ class FuelStockController extends Controller
 
         $receipts = $receiptQuery->get();
 
-        // ── Pemakaian dari laporan alat berat (hanya Solar) ──────────────────
-        // Semua fuel_liters pada heavy_equipment_logs diasumsikan Solar.
-        // Dex Lite tidak dikurangi karena tidak ada field fuel_type pada logs.
+        // ── Pemakaian dari laporan alat berat ────────────────────────────────
+        // Solar  → field fuel_liters
+        // DexLite → field fuel_liters_dex_lite
         $usageByDate = collect();
-        if ($fuelType === 'solar') {
-            $usageQuery = HeavyEquipmentLog::select(
-                    'log_date',
-                    DB::raw('SUM(fuel_liters) as total_liters')
-                )
-                ->whereNotNull('fuel_liters')
-                ->where('fuel_liters', '>', 0);
+        $usageColumn = $fuelType === 'solar' ? 'fuel_liters' : 'fuel_liters_dex_lite';
 
-            if ($kebun)    $usageQuery->where('kebun', $kebun);
-            if ($dateFrom) $usageQuery->whereDate('log_date', '>=', $dateFrom);
-            if ($dateTo)   $usageQuery->whereDate('log_date', '<=', $dateTo);
+        $usageQuery = HeavyEquipmentLog::select(
+                'log_date',
+                DB::raw("SUM({$usageColumn}) as total_liters")
+            )
+            ->whereNotNull($usageColumn)
+            ->where($usageColumn, '>', 0);
 
-            $usageByDate = $usageQuery->groupBy('log_date')->orderBy('log_date')->get();
-        }
+        if ($kebun)    $usageQuery->where('kebun', $kebun);
+        if ($dateFrom) $usageQuery->whereDate('log_date', '>=', $dateFrom);
+        if ($dateTo)   $usageQuery->whereDate('log_date', '<=', $dateTo);
+
+        $usageByDate = $usageQuery->groupBy('log_date')->orderBy('log_date')->get();
 
         // ── Gabungkan & urutkan kronologis ───────────────────────────────────
         $receiptEvents = $receipts->map(fn ($r) => [
