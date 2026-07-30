@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\FuelStockReceipt;
 use App\Models\HeavyEquipmentActivityType;
 use App\Models\HeavyEquipmentLog;
 use Illuminate\Http\UploadedFile;
@@ -162,6 +163,17 @@ class HeavyEquipmentLogService
         $lines[] = '';
         $lines[] = '*BBM*      : ' . $bbm;
 
+        // ── Stock BBM setelah laporan ini masuk ──
+        $kebun = $log->kebun;
+        $stockLines = $this->buildStockSummary($kebun);
+        if ($stockLines) {
+            $lines[] = '';
+            $lines[] = '*📦 Stock BBM (' . $kebun . ')*:';
+            foreach ($stockLines as $sl) {
+                $lines[] = $sl;
+            }
+        }
+
         $photos = $log->photos ?? collect();
         if ($photos->isNotEmpty()) {
             try {
@@ -178,6 +190,39 @@ class HeavyEquipmentLogService
         }
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Hitung saldo BBM per jenis untuk kebun tertentu.
+     * Solar  → penerimaan fuel_stock_receipts − pemakaian heavy_equipment_logs.fuel_liters
+     * Dex Lite → penerimaan − heavy_equipment_logs.fuel_liters_dex_lite
+     *
+     * @return string[]  baris-baris teks untuk pesan WA, atau [] jika tidak ada data
+     */
+    private function buildStockSummary(string $kebun): array
+    {
+        $fmt = fn (float $v) => number_format($v, 0, ',', '.') . ' L';
+
+        $lines = [];
+        foreach (['solar' => 'Solar ☀', 'dex_lite' => 'Dex Lite ⛽'] as $fuelType => $label) {
+            $received = (float) FuelStockReceipt::where('fuel_type', $fuelType)
+                ->where('kebun', $kebun)
+                ->sum('total_liters');
+
+            $usageCol = $fuelType === 'solar' ? 'fuel_liters' : 'fuel_liters_dex_lite';
+            $used = (float) HeavyEquipmentLog::where('kebun', $kebun)
+                ->whereNotNull($usageCol)
+                ->sum($usageCol);
+
+            if ($received == 0 && $used == 0) {
+                continue;
+            }
+
+            $saldo = $received - $used;
+            $lines[] = '- ' . $label . ': Saldo *' . $fmt($saldo) . '* (Σ terima ' . $fmt($received) . ' − pakai ' . $fmt($used) . ')';
+        }
+
+        return $lines;
     }
 
     /**
