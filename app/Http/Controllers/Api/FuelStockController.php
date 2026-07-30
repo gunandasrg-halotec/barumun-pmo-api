@@ -7,9 +7,11 @@ use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
 use App\Models\FuelStockReceipt;
 use App\Models\FuelStockReceiptPhoto;
+use App\Models\HeavyEquipmentLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use OpenApi\Attributes as OA;
@@ -20,7 +22,7 @@ class FuelStockController extends Controller
         tags: ['Fuel Stock'],
         path: "/v1/heavy-equipment/fuel-stock",
         operationId: "FuelStockController@index",
-        summary: "Ledger penerimaan BBM + saldo kumulatif per jenis, per kebun."
+        summary: "Ledger penerimaan BBM + pemakaian + saldo kumulatif per jenis, per kebun."
     )]
     #[Response2xx(description: "Fuel stock ledger")]
     #[ResponseDefault()]
@@ -56,48 +58,108 @@ class FuelStockController extends Controller
 
     private function buildLedger(string $fuelType, ?string $kebun, ?string $dateFrom, ?string $dateTo): array
     {
-        $query = FuelStockReceipt::with('photos')
+        // ── Penerimaan ──────────────────────────────────────────────────────────
+        $receiptQuery = FuelStockReceipt::with('photos')
             ->where('fuel_type', $fuelType)
             ->orderBy('receipt_date');
 
-        if ($kebun) {
-            $query->where('kebun', $kebun);
+        if ($kebun)    $receiptQuery->where('kebun', $kebun);
+        if ($dateFrom) $receiptQuery->whereDate('receipt_date', '>=', $dateFrom);
+        if ($dateTo)   $receiptQuery->whereDate('receipt_date', '<=', $dateTo);
+
+        $receipts = $receiptQuery->get();
+
+        // ── Pemakaian dari laporan alat berat (hanya Solar) ──────────────────
+        // Semua fuel_liters pada heavy_equipment_logs diasumsikan Solar.
+        // Dex Lite tidak dikurangi karena tidak ada field fuel_type pada logs.
+        $usageByDate = collect();
+        if ($fuelType === 'solar') {
+            $usageQuery = HeavyEquipmentLog::select(
+                    'log_date',
+                    DB::raw('SUM(fuel_liters) as total_liters')
+                )
+                ->whereNotNull('fuel_liters')
+                ->where('fuel_liters', '>', 0);
+
+            if ($kebun)    $usageQuery->where('kebun', $kebun);
+            if ($dateFrom) $usageQuery->whereDate('log_date', '>=', $dateFrom);
+            if ($dateTo)   $usageQuery->whereDate('log_date', '<=', $dateTo);
+
+            $usageByDate = $usageQuery->groupBy('log_date')->orderBy('log_date')->get();
         }
-        if ($dateFrom) {
-            $query->whereDate('receipt_date', '>=', $dateFrom);
-        }
-        if ($dateTo) {
-            $query->whereDate('receipt_date', '<=', $dateTo);
-        }
 
-        $receipts = $query->get();
+        // ── Gabungkan & urutkan kronologis ───────────────────────────────────
+        $receiptEvents = $receipts->map(fn ($r) => [
+            'date'       => $r->receipt_date?->toDateString(),
+            'entry_type' => 'receipt',
+            'model'      => $r,
+            'liters'     => (float) $r->total_liters,
+        ]);
 
-        // Running saldo
-        $saldo   = 0;
-        $entries = $receipts->map(function (FuelStockReceipt $r) use (&$saldo) {
-            $saldo += $r->total_liters;
+        $usageEvents = $usageByDate->map(fn ($u) => [
+            'date'       => $u->log_date instanceof \Carbon\Carbon
+                                ? $u->log_date->toDateString()
+                                : (string) $u->log_date,
+            'entry_type' => 'usage',
+            'model'      => null,
+            'liters'     => (float) $u->total_liters,
+        ]);
 
-            $photos = $r->photos->map(fn ($p) => [
-                'id'           => $p->id,
-                'download_url' => str_replace('http://', 'https://', route('fuel-stock.photo.download', ['photo' => $p->id])),
-            ])->values();
+        $allEvents = $receiptEvents->concat($usageEvents)
+            ->sortBy('date')
+            ->values();
 
-            return [
-                'id'           => $r->id,
-                'receipt_date' => $r->receipt_date?->toDateString(),
-                'kebun'        => $r->kebun,
-                'qty_20l'      => $r->qty_20l,
-                'qty_30l'      => $r->qty_30l,
-                'qty_40l'      => $r->qty_40l,
-                'total_liters' => (float) $r->total_liters,
-                'saldo'        => (float) $saldo,
-                'photos'       => $photos,
-            ];
+        // ── Running saldo ────────────────────────────────────────────────────
+        $saldo         = 0.0;
+        $totalReceived = 0.0;
+        $totalUsed     = 0.0;
+
+        $entries = $allEvents->map(function (array $event) use (&$saldo, &$totalReceived, &$totalUsed) {
+            if ($event['entry_type'] === 'receipt') {
+                $r      = $event['model'];
+                $saldo += $event['liters'];
+                $totalReceived += $event['liters'];
+
+                $photos = $r->photos->map(fn ($p) => [
+                    'id'           => $p->id,
+                    'download_url' => str_replace('http://', 'https://', route('fuel-stock.photo.download', ['photo' => $p->id])),
+                ])->values();
+
+                return [
+                    'id'           => $r->id,
+                    'entry_type'   => 'receipt',
+                    'receipt_date' => $event['date'],
+                    'kebun'        => $r->kebun,
+                    'qty_20l'      => $r->qty_20l,
+                    'qty_30l'      => $r->qty_30l,
+                    'qty_40l'      => $r->qty_40l,
+                    'total_liters' => $event['liters'],
+                    'saldo'        => $saldo,
+                    'photos'       => $photos,
+                ];
+            } else {
+                $saldo -= $event['liters'];
+                $totalUsed += $event['liters'];
+
+                return [
+                    'id'           => 'usage-' . $event['date'],
+                    'entry_type'   => 'usage',
+                    'receipt_date' => $event['date'],
+                    'kebun'        => null,
+                    'qty_20l'      => 0,
+                    'qty_30l'      => 0,
+                    'qty_40l'      => 0,
+                    'total_liters' => -$event['liters'],
+                    'saldo'        => $saldo,
+                    'photos'       => [],
+                ];
+            }
         });
 
         return [
-            'total_received' => (float) $receipts->sum('total_liters'),
-            'saldo'          => (float) $saldo,
+            'total_received' => $totalReceived,
+            'total_used'     => $totalUsed,
+            'saldo'          => $saldo,
             'entries'        => $entries->values(),
         ];
     }
