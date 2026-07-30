@@ -14,13 +14,19 @@ class FuelStockReceiptRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'kebun'                  => ['required', 'string', 'max:100'],
-            'receipt_date'           => ['required', 'date'],
-            'receipts'               => ['required', 'array', 'min:1'],
-            'receipts.*.fuel_type'   => ['required', 'in:solar,dex_lite'],
-            'receipts.*.qty_20l'     => ['required', 'integer', 'min:0'],
-            'receipts.*.qty_30l'     => ['required', 'integer', 'min:0'],
-            'receipts.*.qty_40l'     => ['required', 'integer', 'min:0'],
+            'kebun'        => ['required', 'string', 'max:100'],
+            'receipt_date' => ['required', 'date'],
+            // receipts dikirim sebagai JSON string saat multipart/form-data
+            'receipts'     => ['required', 'string'],
+            'photos'       => ['nullable', 'array'],
+            'photos.*'     => ['image', 'max:10240'],
         ];
+    }
+
+    /** Decode field receipts dari JSON string ke array setelah validasi. */
+    public function decodedReceipts(): array
+    {
+        $decoded = json_decode($this->input('receipts'), true);
+        return is_array($decoded) ? $decoded : [];
     }
 }

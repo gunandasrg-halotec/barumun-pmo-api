@@ -13,11 +13,14 @@ use App\Http\Resources\HeavyEquipmentCostItemResource;
 use App\Http\Resources\HeavyEquipmentLogResource;
 use App\Http\Resources\HeavyEquipmentResource;
 use App\Models\FuelStockReceipt;
+use App\Models\FuelStockReceiptPhoto;
 use App\Models\HeavyEquipment;
 use App\Models\HeavyEquipmentActivityType;
 use App\Models\HeavyEquipmentCostItem;
 use App\Services\HeavyEquipmentLogService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use OpenApi\Attributes as OA;
 
 /**
@@ -137,26 +140,49 @@ class PublicHeavyEquipmentController extends Controller
         $kebun       = $validated['kebun'];
         $receiptDate = $validated['receipt_date'];
         $ip          = $request->ip();
+        $entries     = $request->decodedReceipts();
+        $photos      = $request->file('photos', []) ?? [];
 
-        $created = collect($validated['receipts'])->map(function (array $entry) use ($kebun, $receiptDate, $ip) {
+        $created = collect($entries)->map(function (array $entry) use ($kebun, $receiptDate, $ip) {
             $total = FuelStockReceipt::computeTotal(
-                $entry['qty_20l'],
-                $entry['qty_30l'],
-                $entry['qty_40l'],
+                (int) $entry['qty_20l'],
+                (int) $entry['qty_30l'],
+                (int) $entry['qty_40l'],
             );
 
             return FuelStockReceipt::create([
                 'receipt_date' => $receiptDate,
                 'kebun'        => $kebun,
                 'fuel_type'    => $entry['fuel_type'],
-                'qty_20l'      => $entry['qty_20l'],
-                'qty_30l'      => $entry['qty_30l'],
-                'qty_40l'      => $entry['qty_40l'],
+                'qty_20l'      => (int) $entry['qty_20l'],
+                'qty_30l'      => (int) $entry['qty_30l'],
+                'qty_40l'      => (int) $entry['qty_40l'],
                 'total_liters' => $total,
                 'submitted_ip' => $ip,
                 'source'       => 'PUBLIC',
             ]);
         });
+
+        // Upload foto dan lampirkan ke semua receipt dalam batch ini
+        if (!empty($photos)) {
+            $folder = BucketFolder . '/fuel-stock-receipts/' . $kebun . '/' . $receiptDate;
+            foreach ($photos as $file) {
+                if (!$file instanceof UploadedFile) {
+                    continue;
+                }
+                $storagePath = $folder . '/' . uniqid('', true) . '.jpg';
+                Storage::disk('s3')->put($storagePath, fopen($file->getRealPath(), 'r'));
+
+                foreach ($created as $receipt) {
+                    FuelStockReceiptPhoto::create([
+                        'fuel_stock_receipt_id' => $receipt->id,
+                        'storage_path'          => $storagePath,
+                        'original_file_name'    => $file->getClientOriginalName(),
+                        'mime_type'             => $file->getMimeType() ?? 'image/jpeg',
+                    ]);
+                }
+            }
+        }
 
         return response()->json([
             'success' => true,

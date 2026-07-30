@@ -6,8 +6,12 @@ use App\Core\Response2xx;
 use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
 use App\Models\FuelStockReceipt;
+use App\Models\FuelStockReceiptPhoto;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use OpenApi\Attributes as OA;
 
 class FuelStockController extends Controller
@@ -39,9 +43,21 @@ class FuelStockController extends Controller
         ]);
     }
 
+    public function downloadPhoto(FuelStockReceiptPhoto $photo): Response
+    {
+        $diskname = Str::startsWith($photo->storage_path, 'pmo') ? 's3' : 'local';
+        abort_unless(Storage::disk($diskname)->exists($photo->storage_path), 404, 'File not found on disk.');
+
+        return response(Storage::disk($diskname)->get($photo->storage_path), 200, [
+            'Content-Type'        => $photo->mime_type,
+            'Content-Disposition' => 'inline; filename="' . $photo->original_file_name . '"',
+        ]);
+    }
+
     private function buildLedger(string $fuelType, ?string $kebun, ?string $dateFrom, ?string $dateTo): array
     {
-        $query = FuelStockReceipt::where('fuel_type', $fuelType)
+        $query = FuelStockReceipt::with('photos')
+            ->where('fuel_type', $fuelType)
             ->orderBy('receipt_date');
 
         if ($kebun) {
@@ -61,6 +77,11 @@ class FuelStockController extends Controller
         $entries = $receipts->map(function (FuelStockReceipt $r) use (&$saldo) {
             $saldo += $r->total_liters;
 
+            $photos = $r->photos->map(fn ($p) => [
+                'id'           => $p->id,
+                'download_url' => str_replace('http://', 'https://', route('fuel-stock.photo.download', ['photo' => $p->id])),
+            ])->values();
+
             return [
                 'id'           => $r->id,
                 'receipt_date' => $r->receipt_date?->toDateString(),
@@ -70,6 +91,7 @@ class FuelStockController extends Controller
                 'qty_40l'      => $r->qty_40l,
                 'total_liters' => (float) $r->total_liters,
                 'saldo'        => (float) $saldo,
+                'photos'       => $photos,
             ];
         });
 

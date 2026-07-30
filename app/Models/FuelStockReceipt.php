@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class FuelStockReceipt extends Model
 {
@@ -30,6 +31,11 @@ class FuelStockReceipt extends Model
             'qty_30l'      => 'integer',
             'qty_40l'      => 'integer',
         ];
+    }
+
+    public function photos(): HasMany
+    {
+        return $this->hasMany(FuelStockReceiptPhoto::class, 'fuel_stock_receipt_id');
     }
 
     public static function computeTotal(int $qty20l, int $qty30l, int $qty40l): float
