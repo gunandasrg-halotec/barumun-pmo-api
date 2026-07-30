@@ -25,4 +25,7 @@ Route::middleware('pinAuth')->group(function () {
 
     Route::post('/v1/public/heavy-equipment/logs', [PublicHeavyEquipmentController::class, 'storeLog'])
         ->name('public.heavy-equipment.store-log');
+
+    Route::post('/v1/public/heavy-equipment/fuel-receipts', [PublicHeavyEquipmentController::class, 'storeFuelReceipts'])
+        ->name('public.heavy-equipment.store-fuel-receipts');
 });

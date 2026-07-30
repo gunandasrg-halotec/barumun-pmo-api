@@ -5,11 +5,14 @@ namespace App\Http\Controllers\Api;
 use App\Core\Response2xx;
 use App\Core\ResponseDefault;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\FuelStockReceiptRequest;
 use App\Http\Requests\HeavyEquipmentLogRequest;
+use App\Http\Resources\FuelStockReceiptResource;
 use App\Http\Resources\HeavyEquipmentActivityTypeResource;
 use App\Http\Resources\HeavyEquipmentCostItemResource;
 use App\Http\Resources\HeavyEquipmentLogResource;
 use App\Http\Resources\HeavyEquipmentResource;
+use App\Models\FuelStockReceipt;
 use App\Models\HeavyEquipment;
 use App\Models\HeavyEquipmentActivityType;
 use App\Models\HeavyEquipmentCostItem;
@@ -117,6 +120,48 @@ class PublicHeavyEquipmentController extends Controller
             'success' => true,
             'message' => 'Laporan berhasil dikirim',
             'data'    => new HeavyEquipmentLogResource($log),
+        ], 201);
+    }
+
+    #[OA\Post(
+        tags: [HEAVY_EQUIPMENT_PUBLIC_TAG],
+        path: "/v1/public/heavy-equipment/fuel-receipts",
+        operationId: "PublicHeavyEquipmentController@storeFuelReceipts",
+        summary: "Submit penerimaan stock BBM dari lapangan (bulk, multi jenis per hari)."
+    )]
+    #[Response2xx(response: "201", description: "Fuel receipts created")]
+    #[ResponseDefault()]
+    public function storeFuelReceipts(FuelStockReceiptRequest $request): JsonResponse
+    {
+        $validated   = $request->validated();
+        $kebun       = $validated['kebun'];
+        $receiptDate = $validated['receipt_date'];
+        $ip          = $request->ip();
+
+        $created = collect($validated['receipts'])->map(function (array $entry) use ($kebun, $receiptDate, $ip) {
+            $total = FuelStockReceipt::computeTotal(
+                $entry['qty_20l'],
+                $entry['qty_30l'],
+                $entry['qty_40l'],
+            );
+
+            return FuelStockReceipt::create([
+                'receipt_date' => $receiptDate,
+                'kebun'        => $kebun,
+                'fuel_type'    => $entry['fuel_type'],
+                'qty_20l'      => $entry['qty_20l'],
+                'qty_30l'      => $entry['qty_30l'],
+                'qty_40l'      => $entry['qty_40l'],
+                'total_liters' => $total,
+                'submitted_ip' => $ip,
+                'source'       => 'PUBLIC',
+            ]);
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Penerimaan BBM berhasil disimpan',
+            'data'    => FuelStockReceiptResource::collection($created),
         ], 201);
     }
 }
