@@ -50,6 +50,8 @@ class HeavyEquipmentLogService
                     'end_time'      => $this->normalizeTime($activity['end_time'] ?? null),
                     'volume'        => $activity['volume'] ?? null,
                     'unit'          => $activity['unit'] ?? null,
+                    'description'   => $activity['description'] ?? null,
+                    'repair_cost'   => $activity['repair_cost'] ?? null,
                 ]);
             }
 
@@ -125,7 +127,14 @@ class HeavyEquipmentLogService
             $volume = $act->volume !== null ? number_format((float)$act->volume, 0, ',', '.') : null;
             $unit   = $act->unit ?? '';
             $suffix = $volume !== null ? (': ' . $volume . ($unit ? ' ' . $unit : '')) : '';
-            $pekerjaan[] = '- ' . $label . $suffix;
+            $line   = '- ' . $label . $suffix;
+            if (!empty($act->description)) {
+                $line .= ' [' . $act->description . ']';
+            }
+            if ($act->repair_cost !== null) {
+                $line .= ' · Biaya: Rp ' . number_format((float)$act->repair_cost, 0, ',', '.');
+            }
+            $pekerjaan[] = $line;
         }
 
         $bbmParts = [];

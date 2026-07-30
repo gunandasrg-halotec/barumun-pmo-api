@@ -15,6 +15,8 @@ class HeavyEquipmentActivityTypeResource extends ModelResource
             'name'             => $this->name,
             'unit'             => $this->unit,
             'allow_date_range' => (bool) $this->allow_date_range,
+            'has_description'  => (bool) $this->has_description,
+            'has_repair_cost'  => (bool) $this->has_repair_cost,
             'sort_order'       => (int) $this->sort_order,
             'is_active'        => (bool) $this->is_active,
             'created_at'       => $this->created_at,

@@ -19,12 +19,15 @@ class HeavyEquipmentLogActivity extends Model
         'end_time',
         'volume',
         'unit',
+        'description',
+        'repair_cost',
     ];
 
     protected function casts(): array
     {
         return [
-            'volume'     => 'decimal:2',
+            'volume'      => 'decimal:2',
+            'repair_cost' => 'decimal:2',
             'start_date' => 'date',
             'end_date'   => 'date',
         ];

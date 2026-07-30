@@ -45,6 +45,8 @@ class HeavyEquipmentLogResource extends ModelResource
                 'start_time'    => self::shortTime($a->start_time),
                 'end_time'      => self::shortTime($a->end_time),
                 'volume'        => $a->volume !== null ? (float) $a->volume : null,
+                'description'   => $a->description,
+                'repair_cost'   => $a->repair_cost !== null ? (float) $a->repair_cost : null,
                 'unit'          => $a->unit,
             ])->values()),
             'costs' => $this->whenLoaded('costs', fn () => $this->costs->map(fn ($c) => [

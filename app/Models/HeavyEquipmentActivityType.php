@@ -14,6 +14,8 @@ class HeavyEquipmentActivityType extends Model
         'name',
         'unit',
         'allow_date_range',
+        'has_description',
+        'has_repair_cost',
         'sort_order',
         'is_active',
     ];
@@ -22,6 +24,8 @@ class HeavyEquipmentActivityType extends Model
     {
         return [
             'allow_date_range' => 'boolean',
+            'has_description'  => 'boolean',
+            'has_repair_cost'  => 'boolean',
             'is_active'        => 'boolean',
         ];
     }
