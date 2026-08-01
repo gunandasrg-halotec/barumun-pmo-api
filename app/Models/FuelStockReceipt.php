@@ -18,6 +18,7 @@ class FuelStockReceipt extends Model
         'qty_30l',
         'qty_35l',
         'qty_40l',
+        'extra_liters',
         'total_liters',
         'notes',
         'submitted_ip',
@@ -33,6 +34,7 @@ class FuelStockReceipt extends Model
             'qty_30l'      => 'integer',
             'qty_35l'      => 'integer',
             'qty_40l'      => 'integer',
+            'extra_liters' => 'float',
         ];
     }
 
@@ -41,8 +43,8 @@ class FuelStockReceipt extends Model
         return $this->hasMany(FuelStockReceiptPhoto::class, 'fuel_stock_receipt_id');
     }
 
-    public static function computeTotal(int $qty20l, int $qty30l, int $qty35l, int $qty40l): float
+    public static function computeTotal(int $qty20l, int $qty30l, int $qty35l, int $qty40l, float $extraLiters = 0): float
     {
-        return ($qty20l * 20) + ($qty30l * 30) + ($qty35l * 35) + ($qty40l * 40);
+        return ($qty20l * 20) + ($qty30l * 30) + ($qty35l * 35) + ($qty40l * 40) + $extraLiters;
     }
 }

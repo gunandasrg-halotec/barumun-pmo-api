@@ -146,11 +146,13 @@ class PublicHeavyEquipmentController extends Controller
         $notes = $request->input('notes') ?: null;
 
         $created = collect($entries)->map(function (array $entry) use ($kebun, $receiptDate, $ip, $notes) {
+            $extraLiters = (float) ($entry['extra_liters'] ?? 0);
             $total = FuelStockReceipt::computeTotal(
                 (int) ($entry['qty_20l'] ?? 0),
                 (int) ($entry['qty_30l'] ?? 0),
                 (int) ($entry['qty_35l'] ?? 0),
                 (int) ($entry['qty_40l'] ?? 0),
+                $extraLiters,
             );
 
             return FuelStockReceipt::create([
@@ -161,6 +163,7 @@ class PublicHeavyEquipmentController extends Controller
                 'qty_30l'      => (int) ($entry['qty_30l'] ?? 0),
                 'qty_35l'      => (int) ($entry['qty_35l'] ?? 0),
                 'qty_40l'      => (int) ($entry['qty_40l'] ?? 0),
+                'extra_liters' => $extraLiters,
                 'total_liters' => $total,
                 'notes'        => $notes,
                 'submitted_ip' => $ip,

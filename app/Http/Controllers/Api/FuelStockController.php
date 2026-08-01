@@ -134,6 +134,7 @@ class FuelStockController extends Controller
                     'qty_30l'      => $r->qty_30l,
                     'qty_35l'      => $r->qty_35l ?? 0,
                     'qty_40l'      => $r->qty_40l,
+                    'extra_liters' => (float) ($r->extra_liters ?? 0),
                     'total_liters' => $event['liters'],
                     'saldo'        => $saldo,
                     'notes'        => $r->notes,
