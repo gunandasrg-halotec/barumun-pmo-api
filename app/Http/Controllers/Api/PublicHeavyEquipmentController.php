@@ -143,21 +143,26 @@ class PublicHeavyEquipmentController extends Controller
         $entries     = $request->decodedReceipts();
         $photos      = $request->file('photos', []) ?? [];
 
-        $created = collect($entries)->map(function (array $entry) use ($kebun, $receiptDate, $ip) {
+        $notes = $request->input('notes') ?: null;
+
+        $created = collect($entries)->map(function (array $entry) use ($kebun, $receiptDate, $ip, $notes) {
             $total = FuelStockReceipt::computeTotal(
-                (int) $entry['qty_20l'],
-                (int) $entry['qty_30l'],
-                (int) $entry['qty_40l'],
+                (int) ($entry['qty_20l'] ?? 0),
+                (int) ($entry['qty_30l'] ?? 0),
+                (int) ($entry['qty_35l'] ?? 0),
+                (int) ($entry['qty_40l'] ?? 0),
             );
 
             return FuelStockReceipt::create([
                 'receipt_date' => $receiptDate,
                 'kebun'        => $kebun,
                 'fuel_type'    => $entry['fuel_type'],
-                'qty_20l'      => (int) $entry['qty_20l'],
-                'qty_30l'      => (int) $entry['qty_30l'],
-                'qty_40l'      => (int) $entry['qty_40l'],
+                'qty_20l'      => (int) ($entry['qty_20l'] ?? 0),
+                'qty_30l'      => (int) ($entry['qty_30l'] ?? 0),
+                'qty_35l'      => (int) ($entry['qty_35l'] ?? 0),
+                'qty_40l'      => (int) ($entry['qty_40l'] ?? 0),
                 'total_liters' => $total,
+                'notes'        => $notes,
                 'submitted_ip' => $ip,
                 'source'       => 'PUBLIC',
             ]);

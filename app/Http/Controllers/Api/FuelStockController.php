@@ -132,9 +132,11 @@ class FuelStockController extends Controller
                     'kebun'        => $r->kebun,
                     'qty_20l'      => $r->qty_20l,
                     'qty_30l'      => $r->qty_30l,
+                    'qty_35l'      => $r->qty_35l ?? 0,
                     'qty_40l'      => $r->qty_40l,
                     'total_liters' => $event['liters'],
                     'saldo'        => $saldo,
+                    'notes'        => $r->notes,
                     'photos'       => $photos,
                 ];
             } else {
@@ -148,9 +150,11 @@ class FuelStockController extends Controller
                     'kebun'        => null,
                     'qty_20l'      => 0,
                     'qty_30l'      => 0,
+                    'qty_35l'      => 0,
                     'qty_40l'      => 0,
                     'total_liters' => -$event['liters'],
                     'saldo'        => $saldo,
+                    'notes'        => null,
                     'photos'       => [],
                 ];
             }
