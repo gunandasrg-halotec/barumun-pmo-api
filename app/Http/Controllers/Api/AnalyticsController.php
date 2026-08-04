@@ -157,53 +157,42 @@ class AnalyticsController extends Controller
             : 0;
 
         // ── Actual progress % (completion estimate) ───────────────────────────
-        // actual volume: realisasi / (realisasi + sisa terbaru per node)
-        $latestRemainingByNode = DB::table('progress_entries as pe')
-            ->join(DB::raw('(
-                SELECT wbd_node_id, MAX(progress_date) as max_date
-                FROM progress_entries
-                WHERE project_id = \'' . $project->id . '\'
-                AND status IN (\'APPROVED\', \'AUTO_APPROVED\')
-                GROUP BY wbd_node_id
-            ) as latest'), function ($join) {
-                $join->on('pe.wbd_node_id', '=', 'latest.wbd_node_id')
-                     ->on('pe.progress_date', '=', 'latest.max_date');
-            })
-            ->join('wbd_nodes as wn', 'pe.wbd_node_id', '=', 'wn.id')
-            ->where('pe.project_id', $project->id)
-            ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
-            ->where('wn.wbd_version_id', $activeVersionId)
-            ->whereNotNull('pe.remaining_volume')
-            ->select('pe.wbd_node_id', 'pe.remaining_volume')
-            ->get();
+        // Sisa per node dihitung ulang dari SEMUA entri disetujui (kumulatif),
+        // bukan snapshot "remaining_volume/remaining_cost" milik entri terakhir saja —
+        // snapshot itu hanya mencerminkan entri itu sendiri, tidak akumulasi riwayat.
+        $approvedVolumeByNode = ProgressEntry::where('project_id', $project->id)
+            ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
+            ->whereHas('wbdNode', fn ($q) => $q->where('wbd_version_id', $activeVersionId))
+            ->selectRaw('wbd_node_id, SUM(progress_volume) as total_volume')
+            ->groupBy('wbd_node_id')
+            ->pluck('total_volume', 'wbd_node_id');
 
-        $totalRemainingVolume  = $latestRemainingByNode->sum('remaining_volume');
+        $approvedCostByNode = DB::table('actual_cost_transactions as act')
+            ->join('progress_entries as pe', 'pe.id', '=', 'act.progress_entry_id')
+            ->join('wbd_nodes as wn', 'wn.id', '=', 'pe.wbd_node_id')
+            ->where('act.project_id', $project->id)
+            ->where('act.status', 'APPROVED')
+            ->where('wn.wbd_version_id', $activeVersionId)
+            ->selectRaw('pe.wbd_node_id, SUM(act.amount) as total_cost')
+            ->groupBy('pe.wbd_node_id')
+            ->pluck('total_cost', 'wbd_node_id');
+
+        $totalRemainingVolume = 0.0;
+        $totalRemainingCost   = 0.0;
+        foreach ($allNodesForDashboard->filter(fn ($n) => $n->node_type === 'ITEM') as $node) {
+            $realizedVol  = (float) ($approvedVolumeByNode[$node->id] ?? 0);
+            $realizedCost = (float) ($approvedCostByNode[$node->id] ?? 0);
+            $totalRemainingVolume += max(0, (float) $node->volume - $realizedVol);
+            $totalRemainingCost   += max(0, (float) $node->planned_cost - $realizedCost);
+        }
+
+        // actual volume: realisasi / (realisasi + sisa kumulatif per node)
         $volDenominator        = $approvedVolume + $totalRemainingVolume;
         $actualProgressPercent = $volDenominator > 0
             ? min(100, round(($approvedVolume / $volDenominator) * 100, 2))
             : 0;
 
-        // actual cost: biaya_realisasi / (biaya_realisasi + sisa_biaya terbaru per node)
-        $latestRemainingCostByNode = DB::table('progress_entries as pe')
-            ->join(DB::raw('(
-                SELECT wbd_node_id, MAX(progress_date) as max_date
-                FROM progress_entries
-                WHERE project_id = \'' . $project->id . '\'
-                AND status IN (\'APPROVED\', \'AUTO_APPROVED\')
-                GROUP BY wbd_node_id
-            ) as latest'), function ($join) {
-                $join->on('pe.wbd_node_id', '=', 'latest.wbd_node_id')
-                     ->on('pe.progress_date', '=', 'latest.max_date');
-            })
-            ->join('wbd_nodes as wn', 'pe.wbd_node_id', '=', 'wn.id')
-            ->where('pe.project_id', $project->id)
-            ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
-            ->where('wn.wbd_version_id', $activeVersionId)
-            ->whereNotNull('pe.remaining_cost')
-            ->select('pe.wbd_node_id', 'pe.remaining_cost')
-            ->get();
-
-        $totalRemainingCost  = $latestRemainingCostByNode->sum('remaining_cost');
+        // actual cost: biaya_realisasi / (biaya_realisasi + sisa_biaya kumulatif per node)
         $costDenominator     = $totalApprovedCost + $totalRemainingCost;
         $actualCostPercent   = $costDenominator > 0
             ? min(100, round(($totalApprovedCost / $costDenominator) * 100, 2))
