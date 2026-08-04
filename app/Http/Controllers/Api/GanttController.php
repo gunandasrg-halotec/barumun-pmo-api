@@ -102,6 +102,7 @@ class GanttController extends Controller
 
         // Progress only available for the active baseline version
         $progressByNode = [];
+        $actualDatesByNode = [];
         if ($isActiveVersion) {
             $progressByNode = ProgressEntry::where('project_id', $project->id)
                 ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
@@ -109,30 +110,88 @@ class GanttController extends Controller
                 ->groupBy('wbd_node_id')
                 ->pluck('total_volume', 'wbd_node_id')
                 ->toArray();
+
+            $actualDatesByNode = ProgressEntry::where('project_id', $project->id)
+                ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
+                ->selectRaw('wbd_node_id, MIN(progress_date) as first_date, MAX(progress_date) as last_date')
+                ->groupBy('wbd_node_id')
+                ->get()
+                ->keyBy('wbd_node_id')
+                ->toArray();
         }
 
-        $ganttData = $nodes->map(function ($node) use ($progressByNode, $isActiveVersion) {
+        $totalBaselineCost = (float) $nodes->whereNull('parent_node_id')->sum('planned_cost');
+        $today = now()->startOfDay();
+
+        $ganttData = $nodes->map(function ($node) use ($progressByNode, $actualDatesByNode, $isActiveVersion, $totalBaselineCost, $today) {
             $actualVolume    = (float) ($progressByNode[$node->id] ?? 0);
             $progressPercent = ($isActiveVersion && $node->volume && $node->volume > 0)
                 ? min(100, round(($actualVolume / $node->volume) * 100, 2))
                 : 0;
 
+            $weightPercent = $totalBaselineCost > 0
+                ? round(((float) $node->planned_cost / $totalBaselineCost) * 100, 2)
+                : 0;
+
+            $actualStartDate = null;
+            $actualEndDate   = null;
+            $expectedProgressPercent = null;
+            $scheduleStatus  = 'NO_DATA';
+
+            if ($node->node_type === 'ITEM' && $isActiveVersion) {
+                $dateRow = $actualDatesByNode[$node->id] ?? null;
+                $actualStartDate = $dateRow['first_date'] ?? null;
+
+                $isCompleted = $node->volume && $node->volume > 0 && $actualVolume >= (float) $node->volume;
+                if ($isCompleted) {
+                    $actualEndDate = $dateRow['last_date'] ?? null;
+                }
+
+                if ($node->start_date && $node->end_date) {
+                    $startMs = $node->start_date->timestamp;
+                    $endMs   = $node->end_date->timestamp;
+                    $todayMs = $today->timestamp;
+
+                    $expectedProgressPercent = $todayMs <= $startMs ? 0.0
+                        : ($todayMs >= $endMs ? 100.0
+                            : round((($todayMs - $startMs) / max(1, $endMs - $startMs)) * 100, 2));
+
+                    if ($isCompleted) {
+                        $scheduleStatus = ($actualEndDate && $actualEndDate <= $node->end_date->toDateString())
+                            ? 'COMPLETED_ON_TIME'
+                            : 'COMPLETED_LATE';
+                    } elseif ($today->timestamp > $endMs) {
+                        $scheduleStatus = 'DELAYED';
+                    } elseif (!$actualStartDate) {
+                        $scheduleStatus = 'NOT_STARTED';
+                    } else {
+                        $diff = $progressPercent - $expectedProgressPercent;
+                        $scheduleStatus = $diff >= 5 ? 'AHEAD' : ($diff <= -10 ? 'DELAYED' : 'ON_TRACK');
+                    }
+                }
+            }
+
             return [
-                'id'               => $node->id,
-                'parent_node_id'   => $node->parent_node_id,
-                'node_type'        => $node->node_type,
-                'code'             => $node->code,
-                'name'             => $node->name,
-                'unit'             => $node->unit,
-                'volume'           => $node->volume !== null ? (float) $node->volume : null,
-                'planned_cost'     => $node->planned_cost !== null ? (float) $node->planned_cost : null,
-                'start_date'       => $node->start_date?->toDateString(),
-                'end_date'         => $node->end_date?->toDateString(),
-                'duration_days'    => $node->duration_days,
-                'status'           => $node->status,
-                'sort_order'       => $node->sort_order,
-                'actual_volume'    => $actualVolume,
-                'progress_percent' => $progressPercent,
+                'id'                        => $node->id,
+                'parent_node_id'            => $node->parent_node_id,
+                'node_type'                 => $node->node_type,
+                'code'                      => $node->code,
+                'name'                      => $node->name,
+                'unit'                      => $node->unit,
+                'volume'                    => $node->volume !== null ? (float) $node->volume : null,
+                'planned_cost'              => $node->planned_cost !== null ? (float) $node->planned_cost : null,
+                'start_date'                => $node->start_date?->toDateString(),
+                'end_date'                  => $node->end_date?->toDateString(),
+                'duration_days'             => $node->duration_days,
+                'status'                    => $node->status,
+                'sort_order'                => $node->sort_order,
+                'actual_volume'             => $actualVolume,
+                'progress_percent'          => $progressPercent,
+                'weight_percent'            => $weightPercent,
+                'actual_start_date'         => $actualStartDate,
+                'actual_end_date'           => $actualEndDate,
+                'expected_progress_percent' => $expectedProgressPercent,
+                'schedule_status'           => $scheduleStatus,
             ];
         });
 
