@@ -66,7 +66,7 @@ class WbdService
             $fresh = $version->fresh(['project']);
             $projectName = $fresh->project->project_name ?? '-';
             $versionNumber = $fresh->version_number;
-            $message = "Aplikasi PMO - {$projectName}\nWBD versi {$versionNumber} menunggu persetujuan Anda";
+            $message = "*Notifikasi Aplikasi PMO - {$projectName}*\nWBD versi {$versionNumber} menunggu persetujuan Anda";
 
             User::whereHas('role', fn ($q) => $q->where('role_name', RoleName::DIREKSI->value))
                 ->whereNotNull('phone')->where('phone', '!=', '')
@@ -113,7 +113,7 @@ class WbdService
             $fresh = $version->fresh(['project', 'submittedByUser']);
             $projectName = $fresh->project->project_name ?? '-';
             $versionNumber = $fresh->version_number;
-            $message = "Aplikasi PMO - {$projectName}\nWBD versi {$versionNumber} telah disetujui Direksi";
+            $message = "*Notifikasi Aplikasi PMO - {$projectName}*\nWBD versi {$versionNumber} telah disetujui Direksi";
 
             User::whereHas('role', fn ($q) => $q->whereIn('role_name', [
                     RoleName::PROJECT_MANAGER->value,
@@ -148,7 +148,7 @@ class WbdService
             $fresh = $version->fresh(['project', 'submittedByUser']);
             $projectName = $fresh->project->project_name ?? '-';
             $versionNumber = $fresh->version_number;
-            $message = "Aplikasi PMO - {$projectName}\nWBD versi {$versionNumber} ditolak Direksi. Alasan: {$reason}";
+            $message = "*Notifikasi Aplikasi PMO - {$projectName}*\nWBD versi {$versionNumber} ditolak Direksi. Alasan: {$reason}";
 
             User::whereHas('role', fn ($q) => $q->whereIn('role_name', [
                     RoleName::PROJECT_MANAGER->value,

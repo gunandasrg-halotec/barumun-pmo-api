@@ -263,13 +263,13 @@ class ProgressService
 
             // WhatsApp: beritahu approver yang relevan
             if ($status === ProgressStatus::PENDING_PM_APPROVAL->value) {
-                $msg = "Ada progress baru dari {$enteredBy->full_name} pada proyek {$project->project_name} menunggu persetujuan Anda";
+                $msg = "*Notifikasi Aplikasi PMO - {$project->project_name}*\nAda progress baru dari {$enteredBy->full_name} pada proyek {$project->project_name} menunggu persetujuan Anda";
                 User::whereHas('role', fn ($q) => $q->where('role_name', RoleName::PROJECT_MANAGER->value))
                     ->whereNotNull('phone')->where('phone', '!=', '')
                     ->each(fn ($u) => $this->whatsApp->send($u->phone, $msg));
             } elseif ($status === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value) {
-                $msg = "Aplikasi PMO - {$project->project_name}\n"
-                    . "⚠️ Progress {$node->code} - {$node->name} menunggu persetujuan Anda (melebihi rencana)\n\n"
+                $msg = "*Notifikasi Aplikasi PMO - {$project->project_name}*\n"
+                    . "⚠️ Progress {$node->code} - {$node->name} menunggu persetujuan Anda karena melebihi rencana (overbudget)\n\n"
                     . "Diinput oleh: {$enteredBy->full_name}\n"
                     . implode("\n", $reasonLines) . "\n"
                     . "Catatan: " . (($data['note'] ?? '') !== '' ? $data['note'] : '-');
@@ -328,7 +328,7 @@ class ProgressService
             if ($submitter?->phone) {
                 $this->whatsApp->send(
                     $submitter->phone,
-                    "Progress {$nodeName} pada proyek {$projectName} telah disetujui {$approverLabel}"
+                    "*Notifikasi Aplikasi PMO - {$projectName}*\nProgress {$nodeName} pada proyek {$projectName} telah disetujui {$approverLabel}"
                 );
             }
 
@@ -377,7 +377,7 @@ class ProgressService
             if ($submitter?->phone) {
                 $this->whatsApp->send(
                     $submitter->phone,
-                    "Progress {$nodeName} pada proyek {$projectName} ditolak {$approverLabel}. Alasan: {$reason}"
+                    "*Notifikasi Aplikasi PMO - {$projectName}*\nProgress {$nodeName} pada proyek {$projectName} ditolak {$approverLabel}. Alasan: {$reason}"
                 );
             }
 
