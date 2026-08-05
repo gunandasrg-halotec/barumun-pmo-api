@@ -228,7 +228,7 @@ class ProgressService
                     '%s mencatat realisasi melebihi rencana untuk item "%s" pada proyek "%s".' . "\n" . '%s',
                     $enteredBy->full_name,
                     $node->name,
-                    $project->name,
+                    $project->project_name,
                     implode("\n", $reasonLines)
                 );
 
@@ -241,7 +241,7 @@ class ProgressService
                         'message' => $notifMessage,
                         'data' => [
                             'project_id' => $project->id,
-                            'project_name' => $project->name,
+                            'project_name' => $project->project_name,
                             'wbd_node_id' => $node->id,
                             'wbd_node_name' => $node->name,
                             'progress_entry_id' => $progress->id,
@@ -263,12 +263,12 @@ class ProgressService
 
             // WhatsApp: beritahu approver yang relevan
             if ($status === ProgressStatus::PENDING_PM_APPROVAL->value) {
-                $msg = "Ada progress baru dari {$enteredBy->full_name} pada proyek {$project->name} menunggu persetujuan Anda";
+                $msg = "Ada progress baru dari {$enteredBy->full_name} pada proyek {$project->project_name} menunggu persetujuan Anda";
                 User::whereHas('role', fn ($q) => $q->where('role_name', RoleName::PROJECT_MANAGER->value))
                     ->whereNotNull('phone')->where('phone', '!=', '')
                     ->each(fn ($u) => $this->whatsApp->send($u->phone, $msg));
             } elseif ($status === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value) {
-                $msg = "Aplikasi PMO - {$project->name}\n"
+                $msg = "Aplikasi PMO - {$project->project_name}\n"
                     . "⚠️ Progress {$node->code} - {$node->name} menunggu persetujuan Anda (melebihi rencana)\n\n"
                     . "Diinput oleh: {$enteredBy->full_name}\n"
                     . implode("\n", $reasonLines) . "\n"
@@ -320,7 +320,7 @@ class ProgressService
 
             $fresh = $progress->fresh(['wbdNode', 'project', 'enteredByUser']);
             $nodeName = $fresh->wbdNode->name ?? '-';
-            $projectName = $fresh->project->name ?? '-';
+            $projectName = $fresh->project->project_name ?? '-';
             $approverLabel = $prevStatus === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value
                 ? 'Direksi'
                 : 'Manajer Kebun';
@@ -369,7 +369,7 @@ class ProgressService
 
             $fresh = $progress->fresh(['wbdNode', 'project', 'enteredByUser']);
             $nodeName = $fresh->wbdNode->name ?? '-';
-            $projectName = $fresh->project->name ?? '-';
+            $projectName = $fresh->project->project_name ?? '-';
             $approverLabel = $prevStatus === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value
                 ? 'Direksi'
                 : 'Manajer Kebun';
