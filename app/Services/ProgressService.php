@@ -89,8 +89,9 @@ class ProgressService
 
         // Cek apakah volume melebihi rencana
         $isOverVolume = false;
+        $existingVolume = 0.0;
         if ($node->volume !== null && $node->volume > 0) {
-            $existingVolume = ProgressEntry::where('wbd_node_id', $node->id)
+            $existingVolume = (float) ProgressEntry::where('wbd_node_id', $node->id)
                 ->whereIn('status', [
                     ProgressStatus::APPROVED->value,
                     ProgressStatus::AUTO_APPROVED->value,
@@ -99,16 +100,37 @@ class ProgressService
                 ])
                 ->sum('progress_volume');
 
-            $remaining = (float) $node->volume - (float) $existingVolume;
+            $remaining = (float) $node->volume - $existingVolume;
 
             if ((float) $data['progress_volume'] > $remaining) {
                 $isOverVolume = true;
             }
         }
 
-        return DB::transaction(function () use ($project, $node, $data, $enteredBy, $isOverVolume) {
-            // Jika volume melebihi rencana → wajib persetujuan Direktur, tidak peduli role penginput
-            if ($isOverVolume) {
+        // Cek apakah biaya realisasi melebihi rencana — pola identik dengan volume di atas.
+        $isOverCost = false;
+        $existingCost = 0.0;
+        $actualCostInput = (float) ($data['actual_cost'] ?? 0);
+        if ($node->planned_cost !== null && $node->planned_cost > 0 && $actualCostInput > 0) {
+            $existingCost = (float) ActualCostTransaction::whereHas(
+                'progressEntry',
+                fn ($q) => $q->where('wbd_node_id', $node->id)
+            )->where('status', '!=', 'REJECTED')->sum('amount');
+
+            $remainingCostPlan = (float) $node->planned_cost - $existingCost;
+
+            if ($actualCostInput > $remainingCostPlan) {
+                $isOverCost = true;
+            }
+        }
+
+        return DB::transaction(function () use (
+            $project, $node, $data, $enteredBy,
+            $isOverVolume, $existingVolume, $isOverCost, $existingCost, $actualCostInput
+        ) {
+            // Jika volume atau biaya melebihi rencana → wajib persetujuan Direktur,
+            // tidak peduli role penginput.
+            if ($isOverVolume || $isOverCost) {
                 $status = ProgressStatus::PENDING_DIRECTOR_APPROVAL->value;
             } elseif ($enteredBy->isProjectManager()) {
                 $status = ProgressStatus::AUTO_APPROVED->value;
@@ -172,17 +194,43 @@ class ProgressService
 
             $progress->update(['remaining_cost' => $remainingCost]);
 
-            // Kirim notifikasi ke Direktur jika realisasi + sisa > rencana
-            if (
-                $remainingVolume !== null &&
-                $node->volume !== null &&
-                ((float) $data['progress_volume'] + $remainingVolume) > (float) $node->volume
-            ) {
+            // Susun baris alasan overrun (dipakai bersama untuk notifikasi in-app & WhatsApp)
+            $reasonLines = [];
+            if ($isOverVolume) {
+                $reasonLines[] = sprintf(
+                    '- Volume: %s %s (sisa rencana sebelum entri ini: %s %s, rencana total: %s %s)',
+                    number_format((float) $data['progress_volume'], 2, ',', '.'),
+                    $node->unit,
+                    number_format(max(0, (float) $node->volume - $existingVolume), 2, ',', '.'),
+                    $node->unit,
+                    number_format((float) $node->volume, 2, ',', '.'),
+                    $node->unit,
+                );
+            }
+            if ($isOverCost) {
+                $reasonLines[] = sprintf(
+                    '- Biaya: Rp %s (sisa rencana sebelum entri ini: Rp %s, rencana total: Rp %s)',
+                    number_format($actualCostInput, 0, ',', '.'),
+                    number_format(max(0, (float) $node->planned_cost - $existingCost), 0, ',', '.'),
+                    number_format((float) $node->planned_cost, 0, ',', '.'),
+                );
+            }
+
+            // Kirim notifikasi ke Direktur jika volume dan/atau biaya melebihi rencana
+            if ($isOverVolume || $isOverCost) {
                 $directors = User::whereHas(
                     'role',
                     fn($q) =>
                     $q->where('role_name', RoleName::DIREKSI->value)
                 )->get();
+
+                $notifMessage = sprintf(
+                    '%s mencatat realisasi melebihi rencana untuk item "%s" pada proyek "%s".' . "\n" . '%s',
+                    $enteredBy->full_name,
+                    $node->name,
+                    $project->name,
+                    implode("\n", $reasonLines)
+                );
 
                 foreach ($directors as $director) {
                     Notification::create([
@@ -190,28 +238,19 @@ class ProgressService
                         'triggered_by' => $enteredBy->id,
                         'type' => 'OVER_BUDGET_RISK',
                         'title' => 'Potensi Over Budget: ' . $node->name,
-                        'message' => sprintf(
-                            '%s mencatat realisasi %s %s dengan estimasi sisa %s %s, ' .
-                            'melebihi rencana %s %s untuk item "%s" pada proyek "%s".',
-                            $enteredBy->full_name,
-                            number_format((float) $data['progress_volume'], 2, '.', ','),
-                            $node->unit,
-                            number_format($remainingVolume, 2, '.', ','),
-                            $node->unit,
-                            number_format((float) $node->volume, 2, '.', ','),
-                            $node->unit,
-                            $node->name,
-                            $project->name
-                        ),
+                        'message' => $notifMessage,
                         'data' => [
                             'project_id' => $project->id,
                             'project_name' => $project->name,
                             'wbd_node_id' => $node->id,
                             'wbd_node_name' => $node->name,
                             'progress_entry_id' => $progress->id,
+                            'is_over_volume' => $isOverVolume,
+                            'is_over_cost' => $isOverCost,
                             'volume_plan' => (float) $node->volume,
                             'volume_actual' => (float) $data['progress_volume'],
-                            'volume_remaining' => $remainingVolume,
+                            'cost_plan' => (float) $node->planned_cost,
+                            'cost_actual' => $actualCostInput,
                         ],
                     ]);
                 }
@@ -229,7 +268,11 @@ class ProgressService
                     ->whereNotNull('phone')->where('phone', '!=', '')
                     ->each(fn ($u) => $this->whatsApp->send($u->phone, $msg));
             } elseif ($status === ProgressStatus::PENDING_DIRECTOR_APPROVAL->value) {
-                $msg = "Ada progress melebihi rencana pada pekerjaan {$node->name} di proyek {$project->name} menunggu persetujuan anda";
+                $msg = "Aplikasi PMO - {$project->name}\n"
+                    . "⚠️ Progress {$node->code} - {$node->name} menunggu persetujuan Anda (melebihi rencana)\n\n"
+                    . "Diinput oleh: {$enteredBy->full_name}\n"
+                    . implode("\n", $reasonLines) . "\n"
+                    . "Catatan: " . (($data['note'] ?? '') !== '' ? $data['note'] : '-');
                 User::whereHas('role', fn ($q) => $q->where('role_name', RoleName::DIREKSI->value))
                     ->whereNotNull('phone')->where('phone', '!=', '')
                     ->each(fn ($u) => $this->whatsApp->send($u->phone, $msg));
