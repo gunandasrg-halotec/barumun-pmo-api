@@ -115,7 +115,13 @@ class ProgressService
             $existingCost = (float) ActualCostTransaction::whereHas(
                 'progressEntry',
                 fn ($q) => $q->where('wbd_node_id', $node->id)
-            )->where('status', '!=', 'REJECTED')->sum('amount');
+                    ->whereIn('status', [
+                        ProgressStatus::APPROVED->value,
+                        ProgressStatus::AUTO_APPROVED->value,
+                        ProgressStatus::PENDING_PM_APPROVAL->value,
+                        ProgressStatus::PENDING_DIRECTOR_APPROVAL->value,
+                    ])
+            )->sum('amount');
 
             $remainingCostPlan = (float) $node->planned_cost - $existingCost;
 

@@ -65,6 +65,7 @@ class AnalyticsController extends Controller
         // Approved actual cost — filter to active WBD version only
         $totalApprovedCost = (float) ActualCostTransaction::where('project_id', $project->id)
             ->where('status', 'APPROVED')
+            ->whereHas('progressEntry', fn ($q) => $q->whereIn('status', ['APPROVED', 'AUTO_APPROVED']))
             ->whereHas('progressEntry.wbdNode', fn ($q) => $q->where('wbd_version_id', $activeVersionId))
             ->sum('amount');
 
@@ -172,6 +173,7 @@ class AnalyticsController extends Controller
             ->join('wbd_nodes as wn', 'wn.id', '=', 'pe.wbd_node_id')
             ->where('act.project_id', $project->id)
             ->where('act.status', 'APPROVED')
+            ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
             ->where('wn.wbd_version_id', $activeVersionId)
             ->selectRaw('pe.wbd_node_id, SUM(act.amount) as total_cost')
             ->groupBy('pe.wbd_node_id')
@@ -265,6 +267,7 @@ class AnalyticsController extends Controller
 
         $costByMonth = ActualCostTransaction::where('project_id', $project->id)
             ->where('status', 'APPROVED')
+            ->whereHas('progressEntry', fn ($q) => $q->whereIn('status', ['APPROVED', 'AUTO_APPROVED']))
             ->when($activeVersionId, fn ($q) => $q->whereHas('progressEntry.wbdNode', fn ($nq) => $nq->where('wbd_version_id', $activeVersionId)))
             ->selectRaw("DATE_FORMAT(transaction_date, '%Y-%m') as period, SUM(amount) as amount")
             ->groupBy('period')
@@ -375,6 +378,7 @@ class AnalyticsController extends Controller
                 ->join('progress_entries as pe', 'pe.id', '=', 'act.progress_entry_id')
                 ->where('act.project_id', $project->id)
                 ->where('act.status', 'APPROVED')
+                ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
                 ->selectRaw('pe.wbd_node_id, SUM(act.amount) as total_actual')
                 ->groupBy('pe.wbd_node_id')
                 ->pluck('total_actual', 'wbd_node_id');
@@ -446,6 +450,7 @@ class AnalyticsController extends Controller
             ->join('progress_entries as pe', 'pe.id', '=', 'act.progress_entry_id')
             ->where('act.project_id', $project->id)
             ->where('act.status', 'APPROVED')
+            ->whereIn('pe.status', ['APPROVED', 'AUTO_APPROVED'])
             ->selectRaw('pe.wbd_node_id, SUM(act.amount) as total_actual')
             ->groupBy('pe.wbd_node_id')
             ->pluck('total_actual', 'wbd_node_id');

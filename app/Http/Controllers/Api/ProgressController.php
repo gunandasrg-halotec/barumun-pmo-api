@@ -93,12 +93,15 @@ class ProgressController extends Controller
             $query->whereDate('progress_date', '<=', $filter['date_to']);
         }
 
-        // Aggregate totals across ALL filtered entries (not just current page)
+        // Aggregate totals across ALL filtered entries (not just current page).
+        // Hanya entri APPROVED/AUTO_APPROVED yang dihitung sebagai realisasi proyek —
+        // entri PENDING/REJECTED tidak boleh menambah total volume/biaya realisasi.
         $totalsQuery = clone $query;
-        $totalVolume = (float) (clone $totalsQuery)->sum('progress_volume');
+        $approvedTotalsQuery = (clone $totalsQuery)->whereIn('status', ['APPROVED', 'AUTO_APPROVED']);
+        $totalVolume = (float) (clone $approvedTotalsQuery)->sum('progress_volume');
         $totalCost   = (float) \App\Models\ActualCostTransaction::whereIn(
             'progress_entry_id',
-            (clone $totalsQuery)->select('id')
+            (clone $approvedTotalsQuery)->select('id')
         )->sum('amount');
         $pendingCount = (int) (clone $totalsQuery)
             ->whereIn('status', ['PENDING_PM_APPROVAL', 'PENDING_DIRECTOR_APPROVAL'])
