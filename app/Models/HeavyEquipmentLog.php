@@ -20,6 +20,7 @@ class HeavyEquipmentLog extends Model
         'kenek',
         'fuel_liters',
         'fuel_liters_dex_lite',
+        'fuel_liters_pertadex',
         'work_morning_start',
         'work_morning_end',
         'work_afternoon_start',
@@ -35,6 +36,7 @@ class HeavyEquipmentLog extends Model
             'log_date'    => 'date',
             'fuel_liters'          => 'decimal:2',
             'fuel_liters_dex_lite' => 'decimal:2',
+            'fuel_liters_pertadex' => 'decimal:2',
         ];
     }
 

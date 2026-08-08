@@ -30,6 +30,7 @@ class HeavyEquipmentLogService
                 'kenek'                => $data['kenek'] ?? null,
                 'fuel_liters'          => $data['fuel_liters'] ?? null,
                 'fuel_liters_dex_lite' => $data['fuel_liters_dex_lite'] ?? null,
+                'fuel_liters_pertadex' => $data['fuel_liters_pertadex'] ?? null,
                 'work_morning_start'   => $this->normalizeTime($data['work_morning_start'] ?? null),
                 'work_morning_end'     => $this->normalizeTime($data['work_morning_end'] ?? null),
                 'work_afternoon_start' => $this->normalizeTime($data['work_afternoon_start'] ?? null),
@@ -155,6 +156,7 @@ class HeavyEquipmentLogService
         $bbmParts = [];
         if ($log->fuel_liters !== null)          $bbmParts[] = 'Solar: ' . number_format((float)$log->fuel_liters, 0, ',', '.') . ' ltr';
         if ($log->fuel_liters_dex_lite !== null) $bbmParts[] = 'Dex Lite: ' . number_format((float)$log->fuel_liters_dex_lite, 0, ',', '.') . ' ltr';
+        if ($log->fuel_liters_pertadex !== null) $bbmParts[] = 'Pertadex: ' . number_format((float)$log->fuel_liters_pertadex, 0, ',', '.') . ' ltr';
         $bbm = $bbmParts ? implode(', ', $bbmParts) : '-';
         $kenek   = $log->kenek ?: '-';
         $area    = $log->area ? " ({$log->area})" : '';
@@ -218,8 +220,9 @@ class HeavyEquipmentLogService
 
     /**
      * Hitung saldo BBM per jenis untuk kebun tertentu.
-     * Solar  → penerimaan fuel_stock_receipts − pemakaian heavy_equipment_logs.fuel_liters
+     * Solar    → penerimaan fuel_stock_receipts − pemakaian heavy_equipment_logs.fuel_liters
      * Dex Lite → penerimaan − heavy_equipment_logs.fuel_liters_dex_lite
+     * Pertadex → penerimaan − heavy_equipment_logs.fuel_liters_pertadex
      *
      * @return string[]  baris-baris teks untuk pesan WA, atau [] jika tidak ada data
      */
@@ -228,12 +231,16 @@ class HeavyEquipmentLogService
         $fmt = fn (float $v) => number_format($v, 0, ',', '.') . ' L';
 
         $lines = [];
-        foreach (['solar' => 'Solar ☀', 'dex_lite' => 'Dex Lite ⛽'] as $fuelType => $label) {
+        foreach (['solar' => 'Solar ☀', 'dex_lite' => 'Dex Lite ⛽', 'pertadex' => 'Pertadex ⛽'] as $fuelType => $label) {
             $received = (float) FuelStockReceipt::where('fuel_type', $fuelType)
                 ->where('kebun', $kebun)
                 ->sum('total_liters');
 
-            $usageCol = $fuelType === 'solar' ? 'fuel_liters' : 'fuel_liters_dex_lite';
+            $usageCol = match ($fuelType) {
+                'solar'    => 'fuel_liters',
+                'dex_lite' => 'fuel_liters_dex_lite',
+                'pertadex' => 'fuel_liters_pertadex',
+            };
             $used = (float) HeavyEquipmentLog::where('kebun', $kebun)
                 ->whereNotNull($usageCol)
                 ->sum($usageCol);

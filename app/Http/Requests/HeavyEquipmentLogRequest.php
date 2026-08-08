@@ -29,6 +29,7 @@ class HeavyEquipmentLogRequest extends FormRequest
             'kenek'                => ['nullable', 'string', 'max:100'],
             'fuel_liters'          => ['nullable', 'numeric', 'min:0'],
             'fuel_liters_dex_lite' => ['nullable', 'numeric', 'min:0'],
+            'fuel_liters_pertadex' => ['nullable', 'numeric', 'min:0'],
             'work_morning_start'   => ['nullable', 'string', 'max:10'],
             'work_morning_end'     => ['nullable', 'string', 'max:10'],
             'work_afternoon_start' => ['nullable', 'string', 'max:10'],

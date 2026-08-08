@@ -13,10 +13,13 @@ class WbdVersionRequest extends FormRequest
         $user   = $this->user();
 
         return match ($method) {
-            'index', 'show'        => true,                       // all roles can read
-            'approve', 'reject'    => $user->canApproveWbd(),     // Direksi only
-            'store', 'submit'      => $user->canManageWbd(),      // PM / Admin Proyek
-            default                => false,
+            'index', 'show', 'diff' => true,                       // all roles can read
+            'pending'               => $user->canApproveWbd(),     // Direksi only — bug lama: aksi ini tidak ada di match arms sama sekali (selalu 403)
+            'approve', 'reject'     => $user->canApproveWbd(),     // Direksi only
+            'store', 'submit'       => $user->canManageWbd(),      // PM / Admin Proyek
+            'unlockRevision', 'revokeUnlock', 'finalize' => $user->canApproveWbd(), // Direksi only
+            'startRevision'         => $user->canManageWbd(),      // PM / Admin Proyek
+            default                 => false,
         };
     }
 
@@ -30,6 +33,12 @@ class WbdVersionRequest extends FormRequest
             'approve'=> [],
             'reject' => [
                 'reason' => ['required', 'string', 'min:5', 'max:1000'],
+            ],
+            'finalize' => [
+                'decisions'            => ['required', 'array', 'min:1'],
+                'decisions.*.code'     => ['required', 'string'],
+                'decisions.*.decision' => ['required', 'string', 'in:APPROVED,REJECTED'],
+                'decisions.*.reason'   => ['nullable', 'string', 'max:1000'],
             ],
             default  => [],
         };

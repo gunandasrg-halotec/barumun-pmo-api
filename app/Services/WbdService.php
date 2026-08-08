@@ -5,8 +5,10 @@ namespace App\Services;
 use App\Enums\RoleName;
 use App\Enums\WbdVersionStatus;
 use App\Models\Project;
+use App\Models\ProgressEntry;
 use App\Models\User;
 use App\Models\WbdNode;
+use App\Models\WbdRevisionDecision;
 use App\Models\WbdVersion;
 use Illuminate\Support\Facades\DB;
 
@@ -214,6 +216,412 @@ class WbdService
 
         $node->update(['planned_cost' => $groupCost]);
         return $groupCost;
+    }
+
+    // ─── Revisi Baseline In-Place ──────────────────────────────────────────
+
+    /**
+     * Direksi membuka akses bagi PM/Admin Proyek untuk mulai merevisi baseline aktif.
+     */
+    public function unlockBaselineRevision(WbdVersion $baseline, string $direksiId): WbdVersion
+    {
+        if (!$baseline->is_active) {
+            throw new \RuntimeException('Hanya baseline aktif yang bisa dibuka untuk revisi.');
+        }
+
+        $baseline->update([
+            'revision_unlocked_by' => $direksiId,
+            'revision_unlocked_at' => now(),
+        ]);
+
+        $this->auditLog->logUpdate('wbd_version', $baseline->id, [], ['revision_unlocked_by' => $direksiId]);
+
+        $fresh = $baseline->fresh(['project']);
+        $projectName = $fresh->project->project_name ?? '-';
+        $message = "*Notifikasi Aplikasi PMO - {$projectName}*\n"
+            . "Direksi membuka akses revisi baseline WBD (v{$fresh->version_number}). Anda bisa memulai revisi.";
+
+        User::whereHas('role', fn ($q) => $q->whereIn('role_name', [
+                RoleName::PROJECT_MANAGER->value,
+                RoleName::ADMIN_PROYEK->value,
+            ]))
+            ->whereNotNull('phone')->where('phone', '!=', '')
+            ->each(fn ($u) => $this->whatsApp->send($u->phone, $message));
+
+        return $fresh;
+    }
+
+    /**
+     * Direksi mencabut akses revisi sebelum PM/Admin Proyek mulai (belum ada draf revisi).
+     */
+    public function revokeBaselineUnlock(WbdVersion $baseline): WbdVersion
+    {
+        if (!$baseline->isRevisionUnlocked()) {
+            throw new \RuntimeException('Baseline ini belum dibuka untuk revisi.');
+        }
+
+        $hasOpenRevision = $baseline->revisions()
+            ->whereIn('status', [WbdVersionStatus::DRAFT->value, WbdVersionStatus::PENDING_DIRECTOR_APPROVAL->value])
+            ->exists();
+
+        if ($hasOpenRevision) {
+            throw new \RuntimeException('Sudah ada revisi yang sedang berjalan untuk baseline ini — tolak revisi itu untuk membatalkan, bukan cabut akses.');
+        }
+
+        $baseline->update([
+            'revision_unlocked_by' => null,
+            'revision_unlocked_at' => null,
+        ]);
+
+        return $baseline->fresh();
+    }
+
+    /**
+     * PM/Admin Proyek mulai revisi baseline setelah Direksi membuka akses — membuat WbdVersion
+     * baru (DRAFT, is_baseline_revision=true) hasil clone node dari baseline, lalu consume unlock.
+     */
+    public function startBaselineRevision(WbdVersion $baseline, string $startedBy): WbdVersion
+    {
+        if (!$baseline->is_active) {
+            throw new \RuntimeException('Hanya baseline aktif yang bisa direvisi.');
+        }
+        if (!$baseline->isRevisionUnlocked()) {
+            throw new \RuntimeException('Direksi belum membuka akses revisi untuk baseline ini.');
+        }
+
+        $hasOpenRevision = $baseline->revisions()
+            ->whereIn('status', [WbdVersionStatus::DRAFT->value, WbdVersionStatus::PENDING_DIRECTOR_APPROVAL->value])
+            ->exists();
+        if ($hasOpenRevision) {
+            throw new \RuntimeException('Sudah ada revisi baseline ini yang masih berjalan.');
+        }
+
+        return DB::transaction(function () use ($baseline, $startedBy) {
+            $nextVersionNumber = ($baseline->project->wbdVersions()->max('version_number') ?? 0) + 1;
+
+            $revision = WbdVersion::create([
+                'project_id' => $baseline->project_id,
+                'version_number' => $nextVersionNumber,
+                'status' => WbdVersionStatus::DRAFT->value,
+                'based_on_version_id' => $baseline->id,
+                'is_active' => false,
+                'is_baseline_revision' => true,
+            ]);
+
+            $this->copyNodesFromVersion($baseline->id, $revision->id);
+
+            $baseline->update([
+                'revision_unlocked_by' => null,
+                'revision_unlocked_at' => null,
+            ]);
+
+            $this->auditLog->logCreate('wbd_version', $revision->id, $revision->toArray());
+
+            return $revision;
+        });
+    }
+
+    /**
+     * Hitung diff node-by-node (dicocokkan via `code`) antara revisi dan baseline yang direvisi.
+     * Dipakai bersama oleh endpoint diff read-only dan finalizeBaselineRevision() — satu sumber
+     * kebenaran supaya yang dilihat Direksi = yang benar-benar terjadi setelah diputuskan.
+     */
+    public function diffRevisionAgainstBaseline(WbdVersion $revision): array
+    {
+        $baseline = $revision->basedOnVersion;
+        if (!$baseline) {
+            throw new \RuntimeException('Revisi ini tidak terhubung ke baseline mana pun.');
+        }
+
+        $baselineNodes = WbdNode::where('wbd_version_id', $baseline->id)->get()->keyBy('code');
+        $revisionNodes = WbdNode::where('wbd_version_id', $revision->id)->get()->keyBy('code');
+
+        $modified = [];
+        $added = [];
+        $removed = [];
+        $removedBlocked = [];
+
+        foreach ($revisionNodes as $code => $revNode) {
+            $baseNode = $baselineNodes->get($code);
+
+            if (!$baseNode) {
+                $added[] = [
+                    'code' => $revNode->code,
+                    'name' => $revNode->name,
+                    'node_type' => $revNode->node_type,
+                    'unit' => $revNode->unit,
+                    'volume' => $revNode->volume !== null ? (float) $revNode->volume : null,
+                    'planned_cost' => $revNode->planned_cost !== null ? (float) $revNode->planned_cost : null,
+                ];
+                continue;
+            }
+
+            // GROUP: cost/volume adalah rollup dari children, bukan field yang diedit langsung —
+            // jangan tampilkan sebagai "perubahan" tersendiri yang perlu diputuskan Direksi.
+            $fields = $revNode->node_type === 'GROUP'
+                ? ['name', 'description', 'sort_order']
+                : ['name', 'description', 'unit', 'volume', 'rate', 'planned_cost', 'start_date', 'duration_days', 'end_date', 'sort_order'];
+
+            $changes = [];
+            foreach ($fields as $f) {
+                $oldVal = $baseNode->{$f};
+                $newVal = $revNode->{$f};
+                $oldCmp = $oldVal instanceof \Carbon\Carbon ? $oldVal->toDateString() : $oldVal;
+                $newCmp = $newVal instanceof \Carbon\Carbon ? $newVal->toDateString() : $newVal;
+                if ((string) $oldCmp !== (string) $newCmp) {
+                    $changes[$f] = ['before' => $oldCmp, 'after' => $newCmp];
+                }
+            }
+
+            if (empty($changes)) {
+                continue;
+            }
+
+            $entry = [
+                'code' => $code,
+                'name' => $revNode->name,
+                'changes' => $changes,
+            ];
+
+            $latestApproved = ProgressEntry::where('wbd_node_id', $baseNode->id)
+                ->whereIn('status', ['APPROVED', 'AUTO_APPROVED'])
+                ->orderByDesc('progress_date')
+                ->orderByDesc('created_at')
+                ->first();
+
+            if ($latestApproved && ($latestApproved->remaining_volume !== null || $latestApproved->remaining_cost !== null)) {
+                $deltaVolume = (float) ($revNode->volume ?? 0) - (float) ($baseNode->volume ?? 0);
+                $deltaCost = (float) ($revNode->planned_cost ?? 0) - (float) ($baseNode->planned_cost ?? 0);
+
+                $oldRemVol = $latestApproved->remaining_volume !== null ? (float) $latestApproved->remaining_volume : null;
+                $oldRemCost = $latestApproved->remaining_cost !== null ? (float) $latestApproved->remaining_cost : null;
+
+                $newRemVol = $oldRemVol !== null ? $oldRemVol + $deltaVolume : null;
+                $newRemCost = $oldRemCost !== null ? $oldRemCost + $deltaCost : null;
+
+                $statusBefore = [];
+                $statusAfter = [];
+                if ($oldRemVol !== null) {
+                    $statusBefore[] = $oldRemVol <= 0 ? 'Selesai' : 'Berjalan';
+                    $statusAfter[] = $newRemVol <= 0 ? 'Selesai' : 'Berjalan';
+                }
+                if ($oldRemCost !== null) {
+                    $statusBefore[] = $oldRemCost < 0 ? 'Over Budget' : 'On-Budget';
+                    $statusAfter[] = $newRemCost < 0 ? 'Over Budget' : 'On-Budget';
+                }
+
+                if ($statusBefore !== $statusAfter) {
+                    $entry['status_impact'] = [
+                        'progress_entry_id' => $latestApproved->id,
+                        'status_before' => implode(' / ', $statusBefore),
+                        'status_after' => implode(' / ', $statusAfter),
+                        'new_remaining_volume' => $newRemVol,
+                        'new_remaining_cost' => $newRemCost,
+                    ];
+                }
+            }
+
+            $modified[] = $entry;
+        }
+
+        foreach ($baselineNodes as $code => $baseNode) {
+            if ($revisionNodes->has($code)) {
+                continue;
+            }
+
+            $item = [
+                'code' => $code,
+                'name' => $baseNode->name,
+                'volume' => $baseNode->volume !== null ? (float) $baseNode->volume : null,
+                'planned_cost' => $baseNode->planned_cost !== null ? (float) $baseNode->planned_cost : null,
+            ];
+
+            if (ProgressEntry::where('wbd_node_id', $baseNode->id)->exists()) {
+                $removedBlocked[] = $item;
+            } else {
+                $removed[] = $item;
+            }
+        }
+
+        return [
+            'modified' => $modified,
+            'added' => $added,
+            'removed' => $removed,
+            'removed_blocked' => $removedBlocked,
+        ];
+    }
+
+    /**
+     * Direksi memutuskan revisi baseline per-item (approve/reject masing-masing), lalu langsung
+     * diterapkan ke baseline (untuk yang APPROVED) dalam satu transaksi. Item REJECTED atau
+     * removed_blocked tidak mengubah apa pun di baseline.
+     *
+     * @param array $decisions [{code, decision: 'APPROVED'|'REJECTED', reason?}]
+     */
+    public function finalizeBaselineRevision(WbdVersion $revision, array $decisions, string $decidedBy): WbdVersion
+    {
+        if (!$revision->isBaselineRevision() || !$revision->isPendingApproval()) {
+            throw new \RuntimeException('Hanya revisi baseline dengan status menunggu persetujuan yang bisa diputuskan.');
+        }
+
+        return DB::transaction(function () use ($revision, $decisions, $decidedBy) {
+            $diff = $this->diffRevisionAgainstBaseline($revision);
+
+            $decidableCodes = collect($diff['modified'])->pluck('code')
+                ->merge(collect($diff['added'])->pluck('code'))
+                ->merge(collect($diff['removed'])->pluck('code'))
+                ->unique()->sort()->values()->all();
+
+            $decisionMap = collect($decisions)->keyBy('code');
+            $submittedCodes = $decisionMap->keys()->sort()->values()->all();
+
+            if ($submittedCodes !== $decidableCodes) {
+                throw new \RuntimeException('Diff sudah berubah atau keputusan tidak lengkap — muat ulang halaman dan coba lagi.');
+            }
+
+            $baseline = $revision->basedOnVersion;
+            $baselineNodesByCode = WbdNode::where('wbd_version_id', $baseline->id)->get()->keyBy('code');
+            $revisionNodesByCode = WbdNode::where('wbd_version_id', $revision->id)->get()->keyBy('code');
+
+            $approvedCount = 0;
+            $rejectedCount = 0;
+            $approvedCodes = [];
+            $rejectedSummary = [];
+
+            foreach ($diff['modified'] as $item) {
+                $code = $item['code'];
+                $decision = $decisionMap[$code];
+                $this->recordRevisionDecision($revision, $code, 'MODIFIED', $decision, $decidedBy);
+
+                if ($decision['decision'] === 'APPROVED') {
+                    $baseNode = $baselineNodesByCode[$code];
+                    $revNode = $revisionNodesByCode[$code];
+                    $baseNode->update([
+                        'name' => $revNode->name,
+                        'description' => $revNode->description,
+                        'unit' => $revNode->unit,
+                        'volume' => $revNode->volume,
+                        'rate' => $revNode->rate,
+                        'planned_cost' => $revNode->planned_cost,
+                        'start_date' => $revNode->start_date,
+                        'duration_days' => $revNode->duration_days,
+                        'end_date' => $revNode->end_date,
+                        'sort_order' => $revNode->sort_order,
+                    ]);
+
+                    if (!empty($item['status_impact'])) {
+                        ProgressEntry::find($item['status_impact']['progress_entry_id'])?->update([
+                            'remaining_volume' => $item['status_impact']['new_remaining_volume'],
+                            'remaining_cost' => $item['status_impact']['new_remaining_cost'],
+                        ]);
+                    }
+
+                    $approvedCount++;
+                    $approvedCodes[] = $code;
+                } else {
+                    $rejectedCount++;
+                    $rejectedSummary[] = $code . (!empty($decision['reason']) ? " — Alasan: \"{$decision['reason']}\"" : '');
+                }
+            }
+
+            foreach ($diff['added'] as $item) {
+                $code = $item['code'];
+                $decision = $decisionMap[$code];
+                $this->recordRevisionDecision($revision, $code, 'ADDED', $decision, $decidedBy);
+
+                if ($decision['decision'] === 'APPROVED') {
+                    $revNode = $revisionNodesByCode[$code];
+                    $parentNode = $revNode->parent_node_id
+                        ? $revisionNodesByCode->first(fn ($n) => $n->id === $revNode->parent_node_id)
+                        : null;
+                    $parentId = $parentNode ? ($baselineNodesByCode[$parentNode->code]->id ?? null) : null;
+
+                    $newNode = WbdNode::create([
+                        'wbd_version_id' => $baseline->id,
+                        'parent_node_id' => $parentId,
+                        'node_type' => $revNode->node_type,
+                        'code' => $revNode->code,
+                        'name' => $revNode->name,
+                        'description' => $revNode->description,
+                        'unit' => $revNode->unit,
+                        'volume' => $revNode->volume,
+                        'rate' => $revNode->rate,
+                        'planned_cost' => $revNode->planned_cost,
+                        'start_date' => $revNode->start_date,
+                        'duration_days' => $revNode->duration_days,
+                        'end_date' => $revNode->end_date,
+                        'status' => $revNode->status,
+                        'sort_order' => $revNode->sort_order,
+                    ]);
+                    $baselineNodesByCode[$code] = $newNode;
+
+                    $approvedCount++;
+                    $approvedCodes[] = $code;
+                } else {
+                    $rejectedCount++;
+                    $rejectedSummary[] = $code . (!empty($decision['reason']) ? " — Alasan: \"{$decision['reason']}\"" : '');
+                }
+            }
+
+            foreach ($diff['removed'] as $item) {
+                $code = $item['code'];
+                $decision = $decisionMap[$code];
+                $this->recordRevisionDecision($revision, $code, 'REMOVED', $decision, $decidedBy);
+
+                if ($decision['decision'] === 'APPROVED') {
+                    $baselineNodesByCode[$code]->delete();
+                    $approvedCount++;
+                    $approvedCodes[] = $code;
+                } else {
+                    $rejectedCount++;
+                    $rejectedSummary[] = $code . (!empty($decision['reason']) ? " — Alasan: \"{$decision['reason']}\"" : '');
+                }
+            }
+
+            $this->recalculate($baseline);
+
+            $finalStatus = $approvedCount > 0 ? WbdVersionStatus::MERGED->value : WbdVersionStatus::REJECTED->value;
+            $revision->update([
+                'status' => $finalStatus,
+                'approved_by' => $decidedBy,
+                'approved_at' => now(),
+            ]);
+
+            $this->auditLog->logApprove('wbd_version', $revision->id, "disetujui={$approvedCount}, ditolak={$rejectedCount}");
+
+            $fresh = $revision->fresh(['project']);
+            $projectName = $fresh->project->project_name ?? '-';
+            $lines = ["*Notifikasi Aplikasi PMO - {$projectName}*", 'Revisi baseline WBD telah diputuskan Direksi:'];
+            if ($approvedCount > 0) {
+                $lines[] = "✅ Disetujui ({$approvedCount}): " . implode(', ', $approvedCodes);
+            }
+            if ($rejectedCount > 0) {
+                $lines[] = "❌ Ditolak ({$rejectedCount}): " . implode('; ', $rejectedSummary);
+            }
+            $message = implode("\n", $lines);
+
+            User::whereHas('role', fn ($q) => $q->whereIn('role_name', [
+                    RoleName::PROJECT_MANAGER->value,
+                    RoleName::ADMIN_PROYEK->value,
+                ]))
+                ->whereNotNull('phone')->where('phone', '!=', '')
+                ->each(fn ($u) => $this->whatsApp->send($u->phone, $message));
+
+            return $fresh;
+        });
+    }
+
+    private function recordRevisionDecision(WbdVersion $revision, string $code, string $changeType, array $decision, string $decidedBy): void
+    {
+        WbdRevisionDecision::create([
+            'wbd_version_id' => $revision->id,
+            'node_code' => $code,
+            'change_type' => $changeType,
+            'decision' => $decision['decision'],
+            'reason' => $decision['reason'] ?? null,
+            'decided_by' => $decidedBy,
+            'decided_at' => now(),
+        ]);
     }
 
     private function copyNodesFromVersion(string $sourceVersionId, string $targetVersionId): void

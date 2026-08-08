@@ -27,6 +27,9 @@ class WbdVersion extends Model
         'rejected_at',
         'rejection_reason',
         'is_active',
+        'is_baseline_revision',
+        'revision_unlocked_by',
+        'revision_unlocked_at',
     ];
 
     protected function casts(): array
@@ -36,6 +39,8 @@ class WbdVersion extends Model
             'approved_at' => 'datetime',
             'rejected_at' => 'datetime',
             'is_active' => 'boolean',
+            'is_baseline_revision' => 'boolean',
+            'revision_unlocked_at' => 'datetime',
         ];
     }
 
@@ -92,5 +97,27 @@ class WbdVersion extends Model
     public function canBeEdited(): bool
     {
         return $this->isDraft();
+    }
+
+    public function isBaselineRevision(): bool
+    {
+        return (bool) $this->is_baseline_revision;
+    }
+
+    public function isRevisionUnlocked(): bool
+    {
+        return $this->revision_unlocked_by !== null;
+    }
+
+    public function revisionUnlockedByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'revision_unlocked_by');
+    }
+
+    /** Revisi baseline lain (dari baseline yang sama) yang belum diputuskan Direksi. */
+    public function revisions(): HasMany
+    {
+        return $this->hasMany(WbdVersion::class, 'based_on_version_id')
+            ->where('is_baseline_revision', true);
     }
 }

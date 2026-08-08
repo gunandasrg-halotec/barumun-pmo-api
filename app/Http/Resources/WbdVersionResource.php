@@ -23,6 +23,9 @@ class WbdVersionResource extends ModelResource
             'status'               => $this->status,
             'is_active'            => (bool) $this->is_active,
             'based_on_version_id'  => $this->based_on_version_id,
+            'is_baseline_revision' => (bool) $this->is_baseline_revision,
+            'revision_unlocked_by' => $this->revision_unlocked_by,
+            'revision_unlocked_at' => $this->revision_unlocked_at,
             'submitted_by'         => $this->submittedByUser ? [
                 'id'        => $this->submittedByUser->id,
                 'full_name' => $this->submittedByUser->full_name,

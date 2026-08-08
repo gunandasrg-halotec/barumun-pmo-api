@@ -34,4 +34,20 @@ Route::middleware('jwtAuth')->group(function () {
 
     Route::post('/v1/wbd-versions/{wbdVersion}/reject', [WbdVersionController::class, 'reject'])
         ->name('wbd-version.reject');
+
+    // Revisi baseline in-place
+    Route::get('/v1/wbd-versions/{wbdVersion}/diff', [WbdVersionController::class, 'diff'])
+        ->name('wbd-version.diff');
+
+    Route::post('/v1/wbd-versions/{wbdVersion}/finalize', [WbdVersionController::class, 'finalize'])
+        ->name('wbd-version.finalize');
+
+    Route::post('/v1/wbd-versions/{wbdVersion}/unlock-revision', [WbdVersionController::class, 'unlockRevision'])
+        ->name('wbd-version.unlock-revision');
+
+    Route::post('/v1/wbd-versions/{wbdVersion}/revoke-unlock', [WbdVersionController::class, 'revokeUnlock'])
+        ->name('wbd-version.revoke-unlock');
+
+    Route::post('/v1/wbd-versions/{wbdVersion}/start-revision', [WbdVersionController::class, 'startRevision'])
+        ->name('wbd-version.start-revision');
 });

@@ -30,6 +30,7 @@ class HeavyEquipmentLogResource extends ModelResource
             'kenek'                => $this->kenek,
             'fuel_liters'          => $this->fuel_liters !== null ? (float) $this->fuel_liters : null,
             'fuel_liters_dex_lite' => $this->fuel_liters_dex_lite !== null ? (float) $this->fuel_liters_dex_lite : null,
+            'fuel_liters_pertadex' => $this->fuel_liters_pertadex !== null ? (float) $this->fuel_liters_pertadex : null,
             'work_morning_start'   => self::shortTime($this->work_morning_start),
             'work_morning_end'     => self::shortTime($this->work_morning_end),
             'work_afternoon_start' => self::shortTime($this->work_afternoon_start),

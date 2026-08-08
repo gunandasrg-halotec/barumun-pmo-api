@@ -32,8 +32,9 @@ class FuelStockController extends Controller
         $dateFrom = $request->query('date_from');
         $dateTo   = $request->query('date_to');
 
-        $solar   = $this->buildLedger('solar',    $kebun, $dateFrom, $dateTo);
-        $dexLite = $this->buildLedger('dex_lite', $kebun, $dateFrom, $dateTo);
+        $solar    = $this->buildLedger('solar',    $kebun, $dateFrom, $dateTo);
+        $dexLite  = $this->buildLedger('dex_lite', $kebun, $dateFrom, $dateTo);
+        $pertadex = $this->buildLedger('pertadex', $kebun, $dateFrom, $dateTo);
 
         return response()->json([
             'success' => true,
@@ -41,6 +42,7 @@ class FuelStockController extends Controller
             'data'    => [
                 'solar'    => $solar,
                 'dex_lite' => $dexLite,
+                'pertadex' => $pertadex,
             ],
         ]);
     }
@@ -70,10 +72,15 @@ class FuelStockController extends Controller
         $receipts = $receiptQuery->get();
 
         // ── Pemakaian dari laporan alat berat ────────────────────────────────
-        // Solar  → field fuel_liters
-        // DexLite → field fuel_liters_dex_lite
+        // Solar    → field fuel_liters
+        // DexLite  → field fuel_liters_dex_lite
+        // Pertadex → field fuel_liters_pertadex
         $usageByDate = collect();
-        $usageColumn = $fuelType === 'solar' ? 'fuel_liters' : 'fuel_liters_dex_lite';
+        $usageColumn = match ($fuelType) {
+            'solar'    => 'fuel_liters',
+            'dex_lite' => 'fuel_liters_dex_lite',
+            'pertadex' => 'fuel_liters_pertadex',
+        };
 
         $usageQuery = HeavyEquipmentLog::select(
                 'log_date',

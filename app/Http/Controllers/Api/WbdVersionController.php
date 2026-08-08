@@ -176,6 +176,24 @@ class WbdVersionController extends Controller
     #[ResponseDefault()]
     public function approve(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
     {
+        if ($wbdVersion->isBaselineRevision()) {
+            // Tombol approve biasa untuk revisi baseline = setujui semua item sekaligus.
+            $diff = $this->wbdService->diffRevisionAgainstBaseline($wbdVersion);
+            $codes = collect($diff['modified'])->pluck('code')
+                ->merge(collect($diff['added'])->pluck('code'))
+                ->merge(collect($diff['removed'])->pluck('code'))
+                ->unique()->values();
+            $decisions = $codes->map(fn ($code) => ['code' => $code, 'decision' => 'APPROVED'])->all();
+
+            $version = $this->wbdService->finalizeBaselineRevision($wbdVersion, $decisions, $request->user()->id);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Semua perubahan pada revisi baseline disetujui dan diterapkan',
+                'data'    => new WbdVersionResource($version->load(['approvedByUser'])),
+            ]);
+        }
+
         $version = $this->wbdService->approveVersion($wbdVersion, $request->user()->id);
 
         return response()->json([
@@ -183,6 +201,138 @@ class WbdVersionController extends Controller
             'message' => 'WBD version approved and set as active baseline',
             'data'    => new WbdVersionResource($version->load(['approvedByUser'])),
         ]);
+    }
+
+    // ─── GET /v1/wbd-versions/{wbdVersion}/diff ──────────────────────────────
+
+    #[OA\Get(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/diff",
+        operationId: "WbdVersionController@diff",
+        summary: "Diff sebuah revisi baseline terhadap baseline yang direvisi. All authenticated users.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Diff revisi vs baseline")]
+    #[ResponseDefault()]
+    public function diff(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'message' => 'Diff fetched successfully',
+            'data'    => $this->wbdService->diffRevisionAgainstBaseline($wbdVersion),
+        ]);
+    }
+
+    // ─── POST /v1/wbd-versions/{wbdVersion}/finalize ─────────────────────────
+
+    #[OA\Post(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/finalize",
+        operationId: "WbdVersionController@finalize",
+        summary: "Direksi memutuskan revisi baseline per-item (approve/reject masing-masing). Allowed: Direksi only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Revisi baseline diputuskan")]
+    #[ResponseDefault()]
+    public function finalize(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
+    {
+        $version = $this->wbdService->finalizeBaselineRevision(
+            $wbdVersion,
+            $request->validated('decisions'),
+            $request->user()->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Keputusan revisi baseline berhasil diterapkan',
+            'data'    => new WbdVersionResource($version->load(['approvedByUser'])),
+        ]);
+    }
+
+    // ─── POST /v1/wbd-versions/{wbdVersion}/unlock-revision ──────────────────
+
+    #[OA\Post(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/unlock-revision",
+        operationId: "WbdVersionController@unlockRevision",
+        summary: "Direksi membuka akses revisi in-place untuk baseline aktif. Allowed: Direksi only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Akses revisi dibuka")]
+    #[ResponseDefault()]
+    public function unlockRevision(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
+    {
+        $version = $this->wbdService->unlockBaselineRevision($wbdVersion, $request->user()->id);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Akses revisi baseline dibuka',
+            'data'    => new WbdVersionResource($version),
+        ]);
+    }
+
+    // ─── POST /v1/wbd-versions/{wbdVersion}/revoke-unlock ────────────────────
+
+    #[OA\Post(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/revoke-unlock",
+        operationId: "WbdVersionController@revokeUnlock",
+        summary: "Direksi mencabut akses revisi baseline sebelum revisi dimulai. Allowed: Direksi only.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(description: "Akses revisi dicabut")]
+    #[ResponseDefault()]
+    public function revokeUnlock(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
+    {
+        $version = $this->wbdService->revokeBaselineUnlock($wbdVersion);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Akses revisi baseline dicabut',
+            'data'    => new WbdVersionResource($version),
+        ]);
+    }
+
+    // ─── POST /v1/wbd-versions/{wbdVersion}/start-revision ───────────────────
+
+    #[OA\Post(
+        tags: [WBD_TAG],
+        path: "/v1/wbd-versions/{wbdVersion}/start-revision",
+        operationId: "WbdVersionController@startRevision",
+        summary: "PM/Admin Proyek mulai revisi baseline setelah Direksi membuka akses. Allowed: PM, Admin Proyek.",
+        parameters: [
+            new OA\Parameter(in: "path", name: "wbdVersion", required: true,
+                schema: new Schema(type: "string", format: "uuid")),
+        ],
+        security: [Auth_JWT]
+    )]
+    #[Response2xx(response: "201", description: "Draf revisi baseline dibuat")]
+    #[ResponseDefault()]
+    public function startRevision(WbdVersionRequest $request, WbdVersion $wbdVersion): JsonResponse
+    {
+        $revision = $this->wbdService->startBaselineRevision($wbdVersion, $request->user()->id);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Draf revisi baseline berhasil dibuat',
+            'data'    => new WbdVersionResource($revision),
+        ], 201);
     }
 
     // ─── POST /v1/wbd-versions/{wbdVersion}/reject ───────────────────────────
