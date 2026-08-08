@@ -29,7 +29,15 @@ class ProgressRequest extends FormRequest
             'store' => [
                 'wbd_node_id'     => ['required', 'uuid', 'exists:wbd_nodes,id'],
                 'progress_date'   => ['required', 'date'],
-                'progress_volume' => ['required', 'numeric', 'gt:0'],
+                // Minimal salah satu dari volume atau biaya harus diisi (>0) — bisa saja hanya
+                // ada realisasi volume tanpa biaya, atau sebaliknya hanya biaya tanpa volume.
+                'progress_volume' => ['nullable', 'numeric', 'min:0', function ($attribute, $value, $fail) {
+                    $vol  = (float) ($value ?? 0);
+                    $cost = (float) ($this->input('actual_cost') ?? 0);
+                    if ($vol <= 0 && $cost <= 0) {
+                        $fail('Realisasi volume atau realisasi biaya harus diisi (tidak boleh keduanya 0).');
+                    }
+                }],
                 'actual_cost'     => ['nullable', 'numeric', 'min:0'],
                 'note'            => ['nullable', 'string', 'max:2000'],
                 'attachment'       => ['nullable', 'file', 'max:10240', 'mimes:jpg,jpeg,png,pdf,doc,docx'],
@@ -50,7 +58,6 @@ class ProgressRequest extends FormRequest
         return [
             'wbd_node_id.required'     => 'WBD node is required.',
             'wbd_node_id.exists'       => 'Selected WBD node does not exist.',
-            'progress_volume.gt'       => 'Progress volume must be greater than 0.',
             'reason.required'          => 'Rejection reason is required.',
         ];
     }

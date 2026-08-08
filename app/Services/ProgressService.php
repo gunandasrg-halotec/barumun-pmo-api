@@ -44,9 +44,10 @@ class ProgressService
             throw new \RuntimeException('Progress can only be created for ITEM-type WBD nodes.');
         }
 
-        // Guard: volume must be > 0
-        if (($data['progress_volume'] ?? 0) <= 0) {
-            throw new \RuntimeException('Progress volume must be greater than 0.');
+        // Guard: minimal salah satu dari volume atau biaya realisasi harus diisi (>0) —
+        // bisa saja hanya ada realisasi volume tanpa biaya, atau sebaliknya.
+        if (((float) ($data['progress_volume'] ?? 0)) <= 0 && ((float) ($data['actual_cost'] ?? 0)) <= 0) {
+            throw new \RuntimeException('Realisasi volume atau realisasi biaya harus diisi (tidak boleh keduanya 0).');
         }
 
         // Guard: node sudah ditandai selesai (remaining_volume = 0)
@@ -102,7 +103,7 @@ class ProgressService
 
             $remaining = (float) $node->volume - $existingVolume;
 
-            if ((float) $data['progress_volume'] > $remaining) {
+            if ((float) ($data['progress_volume'] ?? 0) > $remaining) {
                 $isOverVolume = true;
             }
         }
@@ -148,7 +149,7 @@ class ProgressService
                 'project_id' => $project->id,
                 'wbd_node_id' => $node->id,
                 'progress_date' => $data['progress_date'],
-                'progress_volume' => $data['progress_volume'],
+                'progress_volume' => $data['progress_volume'] ?? 0,
                 'note' => $data['note'] ?? null,
                 'entered_by' => $enteredBy->id,
                 'status' => $status,
@@ -186,7 +187,7 @@ class ProgressService
             $remainingVolume = isset($data['remaining_volume']) && $data['remaining_volume'] !== ''
                 ? (float) $data['remaining_volume']
                 : ($node->volume !== null
-                    ? max(0, (float) $node->volume - (float) $data['progress_volume'])
+                    ? max(0, (float) $node->volume - (float) ($data['progress_volume'] ?? 0))
                     : null);
 
             $progress->update(['remaining_volume' => $remainingVolume]);
@@ -205,7 +206,7 @@ class ProgressService
             if ($isOverVolume) {
                 $reasonLines[] = sprintf(
                     '- Volume: %s %s (sisa rencana sebelum entri ini: %s %s, rencana total: %s %s)',
-                    number_format((float) $data['progress_volume'], 2, ',', '.'),
+                    number_format((float) ($data['progress_volume'] ?? 0), 2, ',', '.'),
                     $node->unit,
                     number_format(max(0, (float) $node->volume - $existingVolume), 2, ',', '.'),
                     $node->unit,
@@ -254,7 +255,7 @@ class ProgressService
                             'is_over_volume' => $isOverVolume,
                             'is_over_cost' => $isOverCost,
                             'volume_plan' => (float) $node->volume,
-                            'volume_actual' => (float) $data['progress_volume'],
+                            'volume_actual' => (float) ($data['progress_volume'] ?? 0),
                             'cost_plan' => (float) $node->planned_cost,
                             'cost_actual' => $actualCostInput,
                         ],
