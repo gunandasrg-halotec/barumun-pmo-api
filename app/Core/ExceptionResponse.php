@@ -89,5 +89,21 @@ class ExceptionResponse
 
             return response()->json($rvalue, $e->getStatusCode(), $e->getHeaders());
         });
+
+        // Catch-all untuk \RuntimeException polos, dipakai luas di layer Service untuk
+        // validasi business rule (mis. "Tanggal progress tidak boleh lebih awal...", "Only
+        // DRAFT versions can be submitted", dll). HARUS didaftarkan TERAKHIR — Symfony's
+        // HttpException (dan turunannya NotFoundHttpException) sebenarnya juga meng-extend
+        // \RuntimeException, jadi handler ini hanya boleh menangkap sisa yang tidak match
+        // renderer HTTP-exception yang lebih spesifik di atas. Tanpa handler ini, pesannya
+        // disembunyikan Laravel jadi generic 500 "Server Error" di production.
+        $exceptions->render(function (\RuntimeException $e, Request $request) {
+            Context::add("type", $e::class);
+            return response()->json([
+                "message" => $e->getMessage(),
+                "type"    => "BusinessRuleException",
+                "src"     => $request->url(),
+            ], 422);
+        });
     }
 }
