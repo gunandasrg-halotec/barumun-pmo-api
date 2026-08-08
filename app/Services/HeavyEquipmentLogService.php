@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\FuelStockReceipt;
 use App\Models\HeavyEquipmentActivityType;
+use App\Models\HeavyEquipmentCostItem;
 use App\Models\HeavyEquipmentLog;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -55,13 +56,27 @@ class HeavyEquipmentLogService
                 ]);
             }
 
+            $systemManagedItems = HeavyEquipmentCostItem::where('is_system_managed', true)
+                ->where('is_active', true)
+                ->get();
+            $systemManagedIds = $systemManagedItems->pluck('id')->all();
+
             foreach ($data['costs'] ?? [] as $cost) {
-                if (empty($cost['cost_item_id'])) {
+                if (empty($cost['cost_item_id']) || in_array($cost['cost_item_id'], $systemManagedIds, true)) {
                     continue;
                 }
                 $log->costs()->create([
                     'heavy_equipment_cost_item_id' => $cost['cost_item_id'],
                     'amount'                       => $cost['amount'] ?? 0,
+                ]);
+            }
+
+            // Item biaya yang dikelola sistem (mis. gaji harian) selalu otomatis
+            // ditambahkan sesuai default_amount-nya, tidak diisi oleh user.
+            foreach ($systemManagedItems as $item) {
+                $log->costs()->create([
+                    'heavy_equipment_cost_item_id' => $item->id,
+                    'amount'                       => $item->default_amount ?? 0,
                 ]);
             }
 

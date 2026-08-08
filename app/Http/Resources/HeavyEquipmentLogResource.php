@@ -53,6 +53,7 @@ class HeavyEquipmentLogResource extends ModelResource
                 'id'           => $c->id,
                 'cost_item_id' => $c->heavy_equipment_cost_item_id,
                 'name'         => $c->relationLoaded('costItem') && $c->costItem ? $c->costItem->name : null,
+                'sort_order'   => $c->relationLoaded('costItem') && $c->costItem ? (int) $c->costItem->sort_order : 0,
                 'amount'       => (float) $c->amount,
             ])->values()),
             'photos' => $this->whenLoaded('photos', fn () => $this->photos->map(fn ($p) => [

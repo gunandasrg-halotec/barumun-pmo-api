@@ -71,7 +71,10 @@ class PublicHeavyEquipmentController extends Controller
     #[ResponseDefault()]
     public function costItems(): JsonResponse
     {
+        // Item yang dikelola sistem (mis. gaji harian) diisi otomatis saat submit,
+        // tidak ditampilkan sebagai field yang bisa diisi user di lapangan.
         $items = HeavyEquipmentCostItem::where('is_active', true)
+            ->where('is_system_managed', false)
             ->orderBy('sort_order')->orderBy('name')->get();
 
         return response()->json([
