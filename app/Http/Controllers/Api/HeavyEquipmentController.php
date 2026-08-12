@@ -57,6 +57,7 @@ class HeavyEquipmentController extends Controller
             'type'      => $request->validated('type'),
             'brand'     => $request->validated('brand'),
             'is_active' => $request->validated('is_active') ?? true,
+            'is_vendor_owned' => $request->validated('is_vendor_owned') ?? false,
         ]);
 
         return response()->json([

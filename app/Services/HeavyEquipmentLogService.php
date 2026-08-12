@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\FuelStockReceipt;
+use App\Models\HeavyEquipment;
 use App\Models\HeavyEquipmentActivityType;
 use App\Models\HeavyEquipmentCostItem;
 use App\Models\HeavyEquipmentLog;
@@ -21,12 +22,15 @@ class HeavyEquipmentLogService
     public function createFromPublic(array $data, array $photos = [], ?string $ip = null): HeavyEquipmentLog
     {
         $log = DB::transaction(function () use ($data, $photos, $ip) {
+            $equipment = HeavyEquipment::findOrFail($data['heavy_equipment_id']);
+            $isVendor  = (bool) $equipment->is_vendor_owned;
+
             $log = HeavyEquipmentLog::create([
                 'heavy_equipment_id'   => $data['heavy_equipment_id'],
                 'log_date'             => $data['log_date'],
                 'kebun'                => $data['kebun'],
                 'area'                 => $data['area'] ?? null,
-                'operator'             => $data['operator'],
+                'operator'             => $data['operator'] ?? null,
                 'kenek'                => $data['kenek'] ?? null,
                 'fuel_liters'          => $data['fuel_liters'] ?? null,
                 'fuel_liters_dex_lite' => $data['fuel_liters_dex_lite'] ?? null,
@@ -57,28 +61,33 @@ class HeavyEquipmentLogService
                 ]);
             }
 
-            $systemManagedItems = HeavyEquipmentCostItem::where('is_system_managed', true)
-                ->where('is_active', true)
-                ->get();
-            $systemManagedIds = $systemManagedItems->pluck('id')->all();
+            // Alat milik vendor (pihak ketiga) tidak dikenai biaya operasional
+            // internal sama sekali — tidak ada baris biaya yang dibuat, jadi
+            // getTotalCostAttribute() otomatis 0 lewat relasi kosong.
+            if (!$isVendor) {
+                $systemManagedItems = HeavyEquipmentCostItem::where('is_system_managed', true)
+                    ->where('is_active', true)
+                    ->get();
+                $systemManagedIds = $systemManagedItems->pluck('id')->all();
 
-            foreach ($data['costs'] ?? [] as $cost) {
-                if (empty($cost['cost_item_id']) || in_array($cost['cost_item_id'], $systemManagedIds, true)) {
-                    continue;
+                foreach ($data['costs'] ?? [] as $cost) {
+                    if (empty($cost['cost_item_id']) || in_array($cost['cost_item_id'], $systemManagedIds, true)) {
+                        continue;
+                    }
+                    $log->costs()->create([
+                        'heavy_equipment_cost_item_id' => $cost['cost_item_id'],
+                        'amount'                       => $cost['amount'] ?? 0,
+                    ]);
                 }
-                $log->costs()->create([
-                    'heavy_equipment_cost_item_id' => $cost['cost_item_id'],
-                    'amount'                       => $cost['amount'] ?? 0,
-                ]);
-            }
 
-            // Item biaya yang dikelola sistem (mis. gaji harian) selalu otomatis
-            // ditambahkan sesuai default_amount-nya, tidak diisi oleh user.
-            foreach ($systemManagedItems as $item) {
-                $log->costs()->create([
-                    'heavy_equipment_cost_item_id' => $item->id,
-                    'amount'                       => $item->default_amount ?? 0,
-                ]);
+                // Item biaya yang dikelola sistem (mis. gaji harian) selalu otomatis
+                // ditambahkan sesuai default_amount-nya, tidak diisi oleh user.
+                foreach ($systemManagedItems as $item) {
+                    $log->costs()->create([
+                        'heavy_equipment_cost_item_id' => $item->id,
+                        'amount'                       => $item->default_amount ?? 0,
+                    ]);
+                }
             }
 
             foreach ($photos as $file) {
@@ -164,6 +173,7 @@ class HeavyEquipmentLogService
         $equipment = $log->equipment;
         $alatId    = $equipment?->code ?? '-';
         $alatNama  = trim(($equipment?->brand ?? '') . ' ' . ($equipment?->type ?? ''));
+        $isVendor  = (bool) $equipment?->is_vendor_owned;
 
         $lines = [
             '🚜 *Laporan Penggunaan Alat Berat*',
@@ -186,8 +196,11 @@ class HeavyEquipmentLogService
             $lines[] = '- (tidak ada pekerjaan)';
         }
 
-        $lines[] = '';
-        $lines[] = '*BBM*      : ' . $bbm;
+        // Alat vendor tidak bawa BBM perusahaan — jangan tampilkan baris pemakaian BBM.
+        if (!$isVendor) {
+            $lines[] = '';
+            $lines[] = '*BBM*      : ' . $bbm;
+        }
 
         // ── Stock BBM setelah laporan ini masuk ──
         $kebun = $log->kebun;

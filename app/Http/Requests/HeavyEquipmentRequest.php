@@ -27,6 +27,7 @@ class HeavyEquipmentRequest extends FormRequest
                 'type'      => ['required', 'string', 'max:100'],
                 'brand'     => ['required', 'string', 'max:100'],
                 'is_active' => ['sometimes', 'boolean'],
+                'is_vendor_owned' => ['sometimes', 'boolean'],
             ],
 
             'update' => [
@@ -34,6 +35,7 @@ class HeavyEquipmentRequest extends FormRequest
                 'type'      => ['sometimes', 'string', 'max:100'],
                 'brand'     => ['sometimes', 'string', 'max:100'],
                 'is_active' => ['sometimes', 'boolean'],
+                'is_vendor_owned' => ['sometimes', 'boolean'],
             ],
 
             default => [],

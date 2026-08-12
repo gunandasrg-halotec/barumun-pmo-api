@@ -57,15 +57,18 @@ class HeavyEquipmentAnalyticsService
             ];
         }
 
-        $daily         = [];
-        $byEquip       = [];
-        $byCostItem    = [];
+        $daily              = [];
+        $byEquip            = [];
+        $byEquipmentActivity = []; // [eqId][activity_type] => accumulator (breakdown, additif)
+        $byCostItem         = [];
         $dailyActivity = []; // [date][activity_type] => volume
 
         foreach ($logs as $log) {
             $date = $log->log_date?->toDateString() ?? '';
             $fuel = (float) ($log->fuel_liters ?? 0);
             $cost = (float) $log->costs->sum('amount');
+            $eq   = $log->equipment;
+            $eqId = $log->heavy_equipment_id;
 
             $totalFuel  += $fuel;
             $totalCost  += $cost;
@@ -100,6 +103,25 @@ class HeavyEquipmentAnalyticsService
                     if ($logTotalMin > 0) {
                         $byActivity[$type]['allocated_cost'] += $cost * ($mins / $logTotalMin);
                     }
+
+                    // Breakdown per alat x jenis pekerjaan — additif, tidak mengubah by_activity di atas.
+                    if (!isset($byEquipmentActivity[$eqId][$type])) {
+                        $byEquipmentActivity[$eqId][$type] = [
+                            'equipment_id'   => $eqId,
+                            'equipment_code' => $eq->code ?? '(alat dihapus)',
+                            'activity_type'  => $type,
+                            'total_volume'   => 0.0,
+                            'total_minutes'  => 0.0,
+                            'entry_count'    => 0,
+                            'allocated_cost' => 0.0,
+                        ];
+                    }
+                    $byEquipmentActivity[$eqId][$type]['total_volume']  += $vol;
+                    $byEquipmentActivity[$eqId][$type]['total_minutes'] += $mins;
+                    $byEquipmentActivity[$eqId][$type]['entry_count']   += 1;
+                    if ($logTotalMin > 0) {
+                        $byEquipmentActivity[$eqId][$type]['allocated_cost'] += $cost * ($mins / $logTotalMin);
+                    }
                 }
 
                 if ($vol > 0) {
@@ -117,8 +139,6 @@ class HeavyEquipmentAnalyticsService
             $daily[$date]['meter']       += $logMeter;
             $daily[$date]['pokok']       += $logPokok;
 
-            $eq   = $log->equipment;
-            $eqId = $log->heavy_equipment_id;
             if (!isset($byEquip[$eqId])) {
                 $byEquip[$eqId] = [
                     'equipment' => $eq ? ['id' => $eq->id, 'code' => $eq->code, 'type' => $eq->type, 'brand' => $eq->brand] : null,
@@ -174,6 +194,35 @@ class HeavyEquipmentAnalyticsService
             ];
         }
 
+        // Finalisasi breakdown per alat x jenis pekerjaan (sama formulanya dengan by_activity di atas).
+        $typeMeta = [];
+        foreach ($allTypes as $type) {
+            $typeMeta[$type->code] = ['label' => $type->name, 'unit' => $type->unit];
+        }
+        $byEquipmentActivityList = [];
+        foreach ($byEquipmentActivity as $rowsByType) {
+            foreach ($rowsByType as $row) {
+                $hours  = round($row['total_minutes'] / 60, 2);
+                $alloc  = round($row['allocated_cost'], 2);
+                $volume = round($row['total_volume'], 2);
+                $meta   = $typeMeta[$row['activity_type']] ?? ['label' => $row['activity_type'], 'unit' => null];
+                $byEquipmentActivityList[] = [
+                    'equipment_id'   => $row['equipment_id'],
+                    'equipment_code' => $row['equipment_code'],
+                    'activity_type'  => $row['activity_type'],
+                    'label'          => $meta['label'],
+                    'unit'           => $meta['unit'],
+                    'total_volume'   => $volume,
+                    'total_hours'    => $hours,
+                    'entry_count'    => $row['entry_count'],
+                    'total_cost'     => $alloc,
+                ];
+            }
+        }
+        usort($byEquipmentActivityList, fn ($a, $b) =>
+            [$a['equipment_code'], $a['activity_type']] <=> [$b['equipment_code'], $b['activity_type']]
+        );
+
         $byCostItemList = [];
         foreach ($byCostItem as $name => $total) {
             $byCostItemList[] = ['name' => $name, 'total' => round($total, 2)];
@@ -215,6 +264,7 @@ class HeavyEquipmentAnalyticsService
             'by_activity'  => $byActivityList,
             'daily_series' => $dailySeries,
             'by_equipment' => array_values($byEquip),
+            'by_equipment_activity' => $byEquipmentActivityList,
             'by_cost_item' => $byCostItemList,
             'activity_daily_series' => $activityDailySeries,
             'activity_daily_types'  => $activityDailyTypes,

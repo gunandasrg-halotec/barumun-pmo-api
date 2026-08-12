@@ -15,6 +15,7 @@ class HeavyEquipmentResource extends ModelResource
             'type'       => $this->type,
             'brand'      => $this->brand,
             'is_active'  => (bool) $this->is_active,
+            'is_vendor_owned' => (bool) $this->is_vendor_owned,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

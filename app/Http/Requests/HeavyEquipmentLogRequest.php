@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\HeavyEquipment;
 use App\Models\HeavyEquipmentActivityType;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -20,12 +21,15 @@ class HeavyEquipmentLogRequest extends FormRequest
 
     public function rules(): array
     {
+        $equipment = HeavyEquipment::find($this->input('heavy_equipment_id'));
+        $isVendor  = (bool) $equipment?->is_vendor_owned;
+
         return [
             'heavy_equipment_id'   => ['required', 'string', Rule::exists('heavy_equipments', 'id')->where('is_active', true)],
             'log_date'             => ['required', 'date'],
             'kebun'                => ['required', 'string', 'max:100'],
             'area'                 => ['nullable', Rule::in(['TM', 'TBM'])],
-            'operator'             => ['required', 'string', 'max:100'],
+            'operator'             => [$isVendor ? 'nullable' : 'required', 'string', 'max:100'],
             'kenek'                => ['nullable', 'string', 'max:100'],
             'fuel_liters'          => ['nullable', 'numeric', 'min:0'],
             'fuel_liters_dex_lite' => ['nullable', 'numeric', 'min:0'],

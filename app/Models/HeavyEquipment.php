@@ -14,11 +14,11 @@ class HeavyEquipment extends Model
     // jadi "heavy_equipment". Set eksplisit agar cocok dengan migrasi.
     protected $table = 'heavy_equipments';
 
-    protected $fillable = ['code', 'type', 'brand', 'is_active'];
+    protected $fillable = ['code', 'type', 'brand', 'is_active', 'is_vendor_owned'];
 
     protected function casts(): array
     {
-        return ['is_active' => 'boolean'];
+        return ['is_active' => 'boolean', 'is_vendor_owned' => 'boolean'];
     }
 
     public function logs(): HasMany
