@@ -203,13 +203,16 @@ class HeavyEquipmentLogService
         }
 
         // ── Stock BBM setelah laporan ini masuk ──
-        $kebun = $log->kebun;
-        $stockLines = $this->buildStockSummary($kebun);
-        if ($stockLines) {
-            $lines[] = '';
-            $lines[] = '*📦 Stock BBM (' . $kebun . ')*:';
-            foreach ($stockLines as $sl) {
-                $lines[] = $sl;
+        // Hanya relevan untuk alat internal — alat vendor tidak pakai stok BBM perusahaan.
+        if (!$isVendor) {
+            $kebun = $log->kebun;
+            $stockLines = $this->buildStockSummary($kebun);
+            if ($stockLines) {
+                $lines[] = '';
+                $lines[] = '*📦 Stock BBM (' . $kebun . ')*:';
+                foreach ($stockLines as $sl) {
+                    $lines[] = $sl;
+                }
             }
         }
 
