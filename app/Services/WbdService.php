@@ -563,19 +563,40 @@ class WbdService
                 }
             }
 
+            $idsToDelete = [];
             foreach ($diff['removed'] as $item) {
                 $code = $item['code'];
                 $decision = $decisionMap[$code];
                 $this->recordRevisionDecision($revision, $code, 'REMOVED', $decision, $decidedBy);
 
                 if ($decision['decision'] === 'APPROVED') {
-                    $baselineNodesByCode[$code]->delete();
+                    $idsToDelete[] = $baselineNodesByCode[$code]->id;
                     $approvedCount++;
                     $approvedCodes[] = $code;
                 } else {
                     $rejectedCount++;
                     $rejectedSummary[] = $code . (!empty($decision['reason']) ? " — Alasan: \"{$decision['reason']}\"" : '');
                 }
+            }
+
+            // Hapus leaf-first: wbd_nodes.parent_node_id self-referencing FK menolak
+            // penghapusan parent selagi anak (yang juga akan dihapus) masih ada.
+            // Ulangi beberapa pass, tiap pass hapus node dalam set ini yang tidak lagi
+            // menjadi parent dari node lain yang MASIH ada di database.
+            $remaining = $idsToDelete;
+            $pass = 0;
+            while (!empty($remaining)) {
+                $pass++;
+                if ($pass > 50) {
+                    throw new \RuntimeException('Gagal menghapus item WBD — struktur pohon terlalu dalam atau tidak konsisten.');
+                }
+                $stillReferenced = WbdNode::whereIn('parent_node_id', $remaining)->pluck('parent_node_id')->unique()->all();
+                $deletable = array_values(array_diff($remaining, $stillReferenced));
+                if (empty($deletable)) {
+                    throw new \RuntimeException('Gagal menghapus item WBD — kemungkinan ada item anak yang tidak ikut dihapus.');
+                }
+                WbdNode::whereIn('id', $deletable)->delete();
+                $remaining = array_values(array_diff($remaining, $deletable));
             }
 
             $this->recalculate($baseline);
